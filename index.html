@@ -211,37 +211,11 @@
         </label>
 
         <label class="layer-row">
-          <input type="checkbox" class="layer-cb" data-layer="flights">
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          <span class="layer-dot" style="background:#f59e0b"></span>
-          <span class="layer-name">Live Flights (OpenSky)</span>
-        </label>
-
-        <label class="layer-row">
-          <input type="checkbox" class="layer-cb" data-layer="bikes">
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          <span class="layer-dot" style="background:#22c55e"></span>
-          <span class="layer-name">Santander Cycles</span>
-        </label>
-
-        <label class="layer-row">
           <input type="checkbox" class="layer-cb" data-layer="companies" checked>
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="layer-dot" style="background:#a78bfa"></span>
           <span class="layer-name">Companies (search)</span>
         </label>
-
-        <!-- ═══ TfL Line Status ═══ -->
-        <div class="layer-section-title">TfL Line Status <span id="tfl-status-time" class="tfl-status-time"></span></div>
-        <div id="tfl-status-grid" class="tfl-status-grid">
-          <div class="tfl-status-loading">Loading line status...</div>
-        </div>
-
-        <!-- ═══ Flight Info ═══ -->
-        <div class="layer-section-title">Live Flights <span id="flight-info-time" class="tfl-status-time"></span></div>
-        <div id="flight-info" class="flight-info-panel">
-          <span class="flight-info-text">Enable layer to track aircraft</span>
-        </div>
 
       </div>
     </div>
@@ -293,16 +267,23 @@
   </div>
 
   <div id="map"></div>
-  <script src="js/api_keys.js"></script>
-  <script src="js/ch_api.js"></script>
-  <script src="js/map.js"></script>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <!-- Core Config First -->
   <script src="js/config.js"></script>
-  <script src="js/icons.js"></script>
+
+  <!-- API Layer Before Map -->
+  <script src="js/ch_api.js"></script>
   <script src="js/psc_api.js"></script>
-  <script src="js/tfl_live.js"></script>
-  <script src="js/opensky.js"></script>
+
+  <!-- Icons Before Map -->
+  <script src="js/icons.js"></script>
+
+  <!-- Map LAST -->
+  <script src="js/map.js"></script>
+
 </body>
 </html>
