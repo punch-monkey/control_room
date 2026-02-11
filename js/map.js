@@ -1755,63 +1755,75 @@ async function searchCompaniesViaAPI(criteria, limit = 100) {
     return [];
   }
   
-  try {
-    // Call Companies House API via proxy
-    const url = `/ch/search/companies?q=${encodeURIComponent(query)}&items_per_page=${limit}`;
-    const response = await fetch(url);
-    
+try {
+    // Build endpoint
+    const endpoint = `/search/companies?q=${encodeURIComponent(query)}&items_per_page=${limit}`;
+
+    // Encode API key for Basic Auth
+    const auth = btoa(window.CH_API_KEY + ":");
+
+    const response = await fetch(
+        "https://api.company-information.service.gov.uk" + endpoint,
+        {
+            headers: {
+                "Authorization": "Basic " + auth,
+                "Accept": "application/json"
+            }
+        }
+    );
+
     if (!response.ok) {
-      console.error("API search failed:", response.status);
-      return [];
+        console.error("API search failed:", response.status);
+        return [];
     }
-    
+
     const data = await response.json();
     let items = data.items || [];
-    
+
     // Transform API results to match local format
     let results = items.map(item => ({
-      CompanyName: item.title || item.company_name || "",
-      CompanyNumber: item.company_number || "",
-      "RegAddress.PostCode": item.address?.postal_code || "",
-      "RegAddress.PostTown": item.address?.locality || "",
-      "RegAddress.AddressLine1": item.address?.address_line_1 || "",
-      CompanyStatus: item.company_status || "",
-      "SICCode.SicText_1": item.sic_codes ? item.sic_codes.join(", ") : "",
-      _rawSicCodes: item.sic_codes || []
+        CompanyName: item.title || item.company_name || "",
+        CompanyNumber: item.company_number || "",
+        "RegAddress.PostCode": item.address?.postal_code || "",
+        "RegAddress.PostTown": item.address?.locality || "",
+        "RegAddress.AddressLine1": item.address?.address_line_1 || "",
+        CompanyStatus: item.company_status || "",
+        "SICCode.SicText_1": item.sic_codes ? item.sic_codes.join(", ") : "",
+        _rawSicCodes: item.sic_codes || []
     }));
-    
-    // Apply local filters (postcode, town) if specified
+
+    // Apply local filters
     if (postcodeFilter) {
-      results = results.filter(r => 
-        r["RegAddress.PostCode"].toLowerCase().includes(postcodeFilter)
-      );
+        results = results.filter(r =>
+            r["RegAddress.PostCode"].toLowerCase().includes(postcodeFilter)
+        );
     }
-    
+
     if (townFilter) {
-      results = results.filter(r => 
-        r["RegAddress.PostTown"].toLowerCase().includes(townFilter)
-      );
+        results = results.filter(r =>
+            r["RegAddress.PostTown"].toLowerCase().includes(townFilter)
+        );
     }
-    
-    // Filter by company status
+
     if (statusFilter) {
-      results = results.filter(r => 
-        r.CompanyStatus.toLowerCase().includes(statusFilter)
-      );
+        results = results.filter(r =>
+            r.CompanyStatus.toLowerCase().includes(statusFilter)
+        );
     }
-    
-    // Filter by SIC code
+
     if (sicFilter) {
-      results = results.filter(r => 
-        r._rawSicCodes.some(sic => sic.includes(sicFilter))
-      );
+        results = results.filter(r =>
+            r._rawSicCodes.some(sic => sic.includes(sicFilter))
+        );
     }
-    
+
     return results;
-  } catch (err) {
+
+} catch (err) {
     console.error("API search error:", err);
     return [];
-  }
+}
+
 }
 
 // ── Clear ──

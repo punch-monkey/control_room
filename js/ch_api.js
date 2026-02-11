@@ -3,37 +3,50 @@
 // Calls CH API directly with Basic Auth (API key from js/api_keys.js)
 
 // ── Shared fetch helper for Companies House API ──
+// ─────────────────────────────────────────────
+// ⚠️ INSECURE DIRECT BROWSER VERSION
+// This exposes your API key in DevTools.
+// Do NOT use in production.
+// ─────────────────────────────────────────────
 
+// Direct Companies House fetch
 function fetchCH(path) {
-  const cfg = CONTROL_ROOM_CONFIG.companiesHouse;
-  if (!cfg.apiKey) {
-    console.error("CH API key not set. Copy js/api_keys.example.js to js/api_keys.js and add your key.");
+  const baseUrl = "https://api.company-information.service.gov.uk";
+
+  if (!window.CH_API_KEY) {
+    console.error("CH API key not set.");
     return Promise.reject(new Error("CH_API_KEY not configured"));
   }
-  const url = cfg.baseUrl + path;
-  return fetch(url, {
+
+  return fetch(baseUrl + path, {
     headers: {
-      "Authorization": "Basic " + btoa(cfg.apiKey + ":"),
+      "Authorization": "Basic " + btoa(window.CH_API_KEY + ":"),
       "Accept": "application/json"
     }
   });
 }
 
+
 // ── API Client ──
 
 const CH_API = {
   cache: {
-    search: new Map(),    // query -> {data, timestamp}
-    company: new Map()    // company_number -> {data, timestamp}
+    search: new Map(),
+    company: new Map()
   },
   cacheTTL: {
-    search: 120000,       // 2 minutes for search results
-    company: 600000       // 10 minutes for company profiles
+    search: 120000,   // 2 minutes
+    company: 600000   // 10 minutes
   }
 };
 
-// Search companies via API
+
+// ─────────────────────────────────────────────
+// Search companies
+// ─────────────────────────────────────────────
+
 async function searchCompaniesAPI(query, limit = 20) {
+
   if (!query || query.trim().length < 2) return [];
 
   const cacheKey = `${query.trim().toLowerCase()}_${limit}`;
@@ -44,11 +57,12 @@ async function searchCompaniesAPI(query, limit = 20) {
   }
 
   try {
-    const response = await fetchCH(`/search/companies?q=${encodeURIComponent(query)}&items_per_page=${limit}`);
+    const response = await fetchCH(
+      `/search/companies?q=${encodeURIComponent(query)}&items_per_page=${limit}`
+    );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error("CH API search failed:", response.status, error);
+      console.error("CH API search failed:", response.status);
       return [];
     }
 
@@ -60,20 +74,27 @@ async function searchCompaniesAPI(query, limit = 20) {
       timestamp: Date.now()
     });
 
+    // Prevent unbounded cache growth
     if (CH_API.cache.search.size > 50) {
       const firstKey = CH_API.cache.search.keys().next().value;
       CH_API.cache.search.delete(firstKey);
     }
 
     return items;
+
   } catch (err) {
     console.error("CH API search error:", err);
     return [];
   }
 }
 
-// Get company profile via API
+
+// ─────────────────────────────────────────────
+// Get company profile
+// ─────────────────────────────────────────────
+
 async function getCompanyProfile(companyNumber) {
+
   if (!companyNumber) return null;
 
   const cacheKey = companyNumber.trim().toUpperCase();
@@ -84,11 +105,12 @@ async function getCompanyProfile(companyNumber) {
   }
 
   try {
-    const response = await fetchCH(`/company/${encodeURIComponent(companyNumber)}`);
+    const response = await fetchCH(
+      `/company/${encodeURIComponent(companyNumber)}`
+    );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error("CH API company fetch failed:", response.status, error);
+      console.error("CH API company fetch failed:", response.status);
       return null;
     }
 
@@ -105,11 +127,13 @@ async function getCompanyProfile(companyNumber) {
     }
 
     return data;
+
   } catch (err) {
     console.error("CH API company error:", err);
     return null;
   }
 }
+
 
 // ── UI Integration ──
 
