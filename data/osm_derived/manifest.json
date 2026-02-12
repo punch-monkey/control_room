@@ -1,0 +1,22 @@
+{
+  "source_pbf": "data\\OS Map\\great-britain-260211.osm.pbf",
+  "backend": "ogr",
+  "profile": "lite",
+  "outputs": {
+    "major_roads": {
+      "features": -1,
+      "bytes": 39669016,
+      "path": "data\\osm_derived\\gb_major_roads_lite.geojson"
+    },
+    "rail_lines": {
+      "features": -1,
+      "bytes": 15355617,
+      "path": "data\\osm_derived\\gb_rail_lines_lite.geojson"
+    },
+    "places": {
+      "features": -1,
+      "bytes": 6642554,
+      "path": "data\\osm_derived\\gb_places.geojson"
+    }
+  }
+}

@@ -28,6 +28,10 @@ data/companies_house_subset.csv
 data/railways/
 data/OS Map/
 data/osm_derived/
+!data/osm_derived/
+!data/osm_derived/gb_major_roads_lite.geojson
+!data/osm_derived/gb_rail_lines_lite.geojson
+!data/osm_derived/manifest.json
 
 # Large GeoJSON source data
 _geojson/hotosm_gbr_buildings_polygons_geojson/
