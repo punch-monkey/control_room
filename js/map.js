@@ -519,7 +519,18 @@ const companyCluster = L.markerClusterGroup({
 const connectionsLayer = L.layerGroup();
 
 // â”€â”€ Custom Entities Layer â”€â”€
-const entitiesLayer = L.layerGroup();
+const entitiesMarkerCluster = L.markerClusterGroup({
+  chunkedLoading: true,
+  maxClusterRadius: 42,
+  spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false,
+  disableClusteringAtZoom: 14,
+  spiderfyDistanceMultiplier: 1.4,
+  animate: true,
+  animateAddingMarkers: true
+});
+const entitiesOverlayLayer = L.layerGroup();
+const entitiesLayer = L.layerGroup([entitiesMarkerCluster, entitiesOverlayLayer]);
 
 const layers = {
   companies:       companyCluster,
@@ -2321,7 +2332,7 @@ function placeEntity(latLng, iconData, label = '', address = '', notes = '', i2E
     i2EntityData: i2EntityData || null
   };
 
-  marker.bindPopup(buildEntityPopup(entityId, entity)).addTo(entitiesLayer);
+  marker.bindPopup(buildEntityPopup(entityId, entity)).addTo(entitiesMarkerCluster);
   bindEntityHoverTooltip(marker, entity);
   marker.on("dragend", () => {
     const next = marker.getLatLng();
@@ -2354,7 +2365,7 @@ function removeEntity(entityId) {
   const idx = window._mapEntities.findIndex(e => e.id === entityId);
   if (idx >= 0) {
     const entity = window._mapEntities[idx];
-    entitiesLayer.removeLayer(entity.marker);
+    entitiesMarkerCluster.removeLayer(entity.marker);
     window._mapEntities.splice(idx, 1);
     if (window._companyEntityIndex) {
       Object.keys(window._companyEntityIndex).forEach((k) => {
@@ -2401,7 +2412,7 @@ function editEntityLabel(entityId) {
 
 function clearAllEntities() {
   window._mapEntities.forEach(entity => {
-    entitiesLayer.removeLayer(entity.marker);
+    entitiesMarkerCluster.removeLayer(entity.marker);
   });
   window._mapEntities = [];
   setStatus('All custom entities removed');
@@ -2853,7 +2864,7 @@ async function importGeoJsonFile(file) {
     onEachFeature: (f, l) => {
       l.bindPopup(propertiesPreviewHtml(f.properties || {}));
     }
-  }).addTo(entitiesLayer);
+  }).addTo(entitiesOverlayLayer);
   window._importedOverlayLayers.push(layer);
   try {
     const b = layer.getBounds?.();
@@ -3015,7 +3026,7 @@ function clearImportedEntities() {
   }
   window._importedEntityIds.clear();
   for (const layer of window._importedOverlayLayers || []) {
-    try { entitiesLayer.removeLayer(layer); } catch (_) {}
+    try { entitiesOverlayLayer.removeLayer(layer); } catch (_) {}
   }
   window._importedOverlayLayers = [];
 
@@ -3951,7 +3962,7 @@ async function addPersonToMap(officerName, address, companies = [], options = {}
       }),
       draggable: true
     });
-    marker.addTo(entitiesLayer);
+    marker.addTo(entitiesMarkerCluster);
     const personEntityId = registerOfficerMarkerAsEntity(marker, {
       name: officerName,
       address: addrString,
