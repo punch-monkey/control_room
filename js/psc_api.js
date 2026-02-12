@@ -11,6 +11,95 @@ const PSC_API = {
   cacheTTL: 600000 // 10 minutes
 };
 
+const COMPANY_PROFILE_PREVIEW_STATE = {
+  objectUrl: null,
+  fileName: ""
+};
+
+function formatDateYYYYMMDD(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+function sanitizeFilenamePart(value) {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildCompanyProfileFileName(companyNumber, companyName) {
+  const datePart = formatDateYYYYMMDD(new Date());
+  const safeName = sanitizeFilenamePart(companyName || "Unknown Company");
+  const safeNumber = sanitizeFilenamePart(companyNumber || "Unknown Number");
+  return `${datePart} - Companies House - ${safeName} - ${safeNumber} - Company Profile.pdf`;
+}
+
+function ensureCompanyProfilePreviewPanel() {
+  let panel = document.getElementById("company-profile-preview-panel");
+  if (panel) return panel;
+
+  panel = document.createElement("div");
+  panel.id = "company-profile-preview-panel";
+  panel.className = "company-profile-preview-panel";
+  panel.innerHTML = `
+    <div class="company-profile-preview-header">
+      <div class="company-profile-preview-title">COMPANY PROFILE PREVIEW</div>
+      <button id="company-profile-preview-close" class="company-profile-preview-close" type="button" aria-label="Close preview">&times;</button>
+    </div>
+    <div id="company-profile-preview-meta" class="company-profile-preview-meta"></div>
+    <div class="company-profile-preview-body">
+      <iframe id="company-profile-preview-frame" title="Company Profile PDF Preview"></iframe>
+    </div>
+    <div class="company-profile-preview-actions">
+      <button id="company-profile-preview-download" class="btn-primary" type="button">Download PDF</button>
+      <button id="company-profile-preview-cancel" class="btn-secondary" type="button">Close</button>
+    </div>
+  `;
+  document.body.appendChild(panel);
+
+  const closePanel = () => {
+    panel.classList.remove("open");
+  };
+
+  panel.querySelector("#company-profile-preview-close")?.addEventListener("click", closePanel);
+  panel.querySelector("#company-profile-preview-cancel")?.addEventListener("click", closePanel);
+  panel.querySelector("#company-profile-preview-download")?.addEventListener("click", () => {
+    if (!COMPANY_PROFILE_PREVIEW_STATE.objectUrl || !COMPANY_PROFILE_PREVIEW_STATE.fileName) return;
+    const a = document.createElement("a");
+    a.href = COMPANY_PROFILE_PREVIEW_STATE.objectUrl;
+    a.download = COMPANY_PROFILE_PREVIEW_STATE.fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setStatus(`Downloaded company profile: ${COMPANY_PROFILE_PREVIEW_STATE.fileName}`);
+  });
+
+  return panel;
+}
+
+function showCompanyProfilePreview(pdfBlob, fileName, companyName, companyNumber) {
+  const panel = ensureCompanyProfilePreviewPanel();
+  const frame = panel.querySelector("#company-profile-preview-frame");
+  const meta = panel.querySelector("#company-profile-preview-meta");
+  if (!frame || !meta) return;
+
+  if (COMPANY_PROFILE_PREVIEW_STATE.objectUrl) {
+    URL.revokeObjectURL(COMPANY_PROFILE_PREVIEW_STATE.objectUrl);
+    COMPANY_PROFILE_PREVIEW_STATE.objectUrl = null;
+  }
+
+  const objectUrl = URL.createObjectURL(pdfBlob);
+  COMPANY_PROFILE_PREVIEW_STATE.objectUrl = objectUrl;
+  COMPANY_PROFILE_PREVIEW_STATE.fileName = fileName;
+
+  frame.src = objectUrl;
+  meta.textContent = `${companyName} (${companyNumber})`;
+  panel.classList.add("open");
+}
+
 // Get PSC for a company via API
 async function getPSCForCompanyAPI(companyNumber) {
   if (!companyNumber) return [];
@@ -828,11 +917,11 @@ async function downloadCompanyProfile(companyNumber, companyName) {
     );
   }
   
-  // Download
-  const fileName = `CompanyProfile_${companyNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-  
-  setStatus(`Downloaded comprehensive profile for ${companyName}`);
+  // Preview first, then allow manual download.
+  const fileName = buildCompanyProfileFileName(companyNumber, companyName);
+  const pdfBlob = doc.output("blob");
+  showCompanyProfilePreview(pdfBlob, fileName, companyName, companyNumber);
+  setStatus(`Preview ready for ${companyName}. Use the right panel to download.`);
 }
 
 // ══════════════════════════════════════════════════════
