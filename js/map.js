@@ -3390,8 +3390,12 @@ const OS_DERIVED_STATE = {
   roadsFailed: false,
   railFailed: false,
   warned: false,
+  roadsData: null,
+  railData: null,
   roadsLayer: null,
-  railLayer: null
+  railLayer: null,
+  roadsRenderSig: "",
+  railRenderSig: ""
 };
 
 function markOsDerivedLayerUnavailable(layerKey, reason = "") {
@@ -3479,6 +3483,118 @@ async function fetchGeoJsonFromCandidates(paths) {
   return null;
 }
 
+function getExpandedBounds(pad = 0.18) {
+  try {
+    return map.getBounds().pad(pad);
+  } catch (_) {
+    return null;
+  }
+}
+
+function featureInBounds(feature, bounds) {
+  if (!feature || !bounds) return false;
+  const g = feature.geometry || {};
+  const t = g.type;
+  const c = g.coordinates;
+  if (!c) return false;
+  const hit = (lng, lat) => bounds.contains([lat, lng]);
+  if (t === "LineString") {
+    for (const p of c) {
+      if (Array.isArray(p) && p.length >= 2 && hit(p[0], p[1])) return true;
+    }
+    return false;
+  }
+  if (t === "MultiLineString") {
+    for (const line of c) {
+      for (const p of line || []) {
+        if (Array.isArray(p) && p.length >= 2 && hit(p[0], p[1])) return true;
+      }
+    }
+    return false;
+  }
+  if (t === "Point") return hit(c[0], c[1]);
+  if (t === "MultiPoint") return (c || []).some((p) => Array.isArray(p) && p.length >= 2 && hit(p[0], p[1]));
+  return false;
+}
+
+function roadVisibleAtZoom(properties = {}, zoom = 0) {
+  const highway = String(properties.highway || "").toLowerCase();
+  if (zoom <= 7) return highway === "motorway" || highway === "trunk";
+  if (zoom <= 9) return highway === "motorway" || highway === "trunk" || highway === "primary";
+  return true;
+}
+
+function railVisibleAtZoom(properties = {}, zoom = 0) {
+  const name = String(properties.name || "").trim();
+  const kind = String(properties.railway || "").toLowerCase();
+  if (zoom <= 7) return !!name && (kind === "rail" || kind === "subway" || kind === "light_rail");
+  if (zoom <= 9) return kind === "rail" || kind === "subway" || kind === "light_rail";
+  return true;
+}
+
+function getOsRenderSignature() {
+  const b = map.getBounds();
+  const z = map.getZoom();
+  return `${z}|${b.getSouth().toFixed(2)}|${b.getWest().toFixed(2)}|${b.getNorth().toFixed(2)}|${b.getEast().toFixed(2)}`;
+}
+
+function renderOsRoadOverlayViewport() {
+  if (!OS_DERIVED_STATE.roadsData || !OS_DERIVED_STATE.roadsLayer) return;
+  const sig = getOsRenderSignature();
+  if (sig === OS_DERIVED_STATE.roadsRenderSig) return;
+  OS_DERIVED_STATE.roadsRenderSig = sig;
+  const bounds = getExpandedBounds(0.22);
+  const zoom = map.getZoom();
+  const features = (OS_DERIVED_STATE.roadsData.features || []).filter((f) => {
+    const p = f.properties || {};
+    return roadVisibleAtZoom(p, zoom) && featureInBounds(f, bounds);
+  });
+  OS_DERIVED_STATE.roadsLayer.clearLayers();
+  L.geoJSON({ type: "FeatureCollection", features }, {
+    style: (f) => ({
+      color: osRoadColorForFeature(f.properties || {}),
+      weight: zoom <= 8 ? 1.4 : 1.9,
+      opacity: zoom <= 8 ? 0.55 : 0.72
+    }),
+    onEachFeature: (f, l) => {
+      if (zoom < 9) return;
+      const name = f.properties?.name || "Major Road";
+      const type = f.properties?.highway || "";
+      l.bindTooltip(`${escapeHtml(name)}${type ? ` (${escapeHtml(type)})` : ""}`, { sticky: true, opacity: 0.85 });
+    }
+  }).addTo(OS_DERIVED_STATE.roadsLayer);
+}
+
+function renderOsRailOverlayViewport() {
+  if (!OS_DERIVED_STATE.railData || !OS_DERIVED_STATE.railLayer) return;
+  const sig = getOsRenderSignature();
+  if (sig === OS_DERIVED_STATE.railRenderSig) return;
+  OS_DERIVED_STATE.railRenderSig = sig;
+  const bounds = getExpandedBounds(0.22);
+  const zoom = map.getZoom();
+  const features = (OS_DERIVED_STATE.railData.features || []).filter((f) => {
+    const p = f.properties || {};
+    return railVisibleAtZoom(p, zoom) && featureInBounds(f, bounds);
+  });
+  OS_DERIVED_STATE.railLayer.clearLayers();
+  L.geoJSON({ type: "FeatureCollection", features }, {
+    style: (f) => ({
+      color: osRailColorForFeature(f.properties || {}),
+      weight: zoom <= 8 ? 1.3 : 1.8,
+      opacity: zoom <= 8 ? 0.6 : 0.78
+    }),
+    onEachFeature: (f, l) => {
+      if (zoom < 9) return;
+      const name = f.properties?.name || "Rail Line";
+      const kind = f.properties?.railway || "";
+      l.bindTooltip(`${escapeHtml(name)}${kind ? ` (${escapeHtml(kind)})` : ""}`, { sticky: true, opacity: 0.88 });
+    }
+  }).addTo(OS_DERIVED_STATE.railLayer);
+}
+
+const scheduleOsRoadViewportRender = debounce(renderOsRoadOverlayViewport, 160);
+const scheduleOsRailViewportRender = debounce(renderOsRailOverlayViewport, 160);
+
 async function loadOsRoadOverlay() {
   if (OS_DERIVED_STATE.roadsLoaded || OS_DERIVED_STATE.roadsFailed) return;
   if (map.getZoom() < 6) {
@@ -3491,19 +3607,11 @@ async function loadOsRoadOverlay() {
       "data/osm_derived/gb_major_roads.geojson"
     ]);
     if (!picked) throw new Error("No OS road dataset found");
-    OS_DERIVED_STATE.roadsLayer = L.geoJSON(picked.data, {
-      style: (f) => ({
-        color: osRoadColorForFeature(f.properties || {}),
-        weight: 1.8,
-        opacity: 0.68
-      }),
-      onEachFeature: (f, l) => {
-        const name = f.properties?.name || "Major Road";
-        const type = f.properties?.highway || "";
-        l.bindTooltip(`${escapeHtml(name)}${type ? ` (${escapeHtml(type)})` : ""}`, { sticky: true, opacity: 0.85 });
-      }
-    }).addTo(layers.os_roads);
+    OS_DERIVED_STATE.roadsData = picked.data;
+    OS_DERIVED_STATE.roadsLayer = L.featureGroup().addTo(layers.os_roads);
     OS_DERIVED_STATE.roadsLoaded = true;
+    OS_DERIVED_STATE.roadsRenderSig = "";
+    renderOsRoadOverlayViewport();
     setStatus(`OS roads overlay loaded (${picked.path.includes("_lite") ? "lite" : "full"}).`);
   } catch (err) {
     OS_DERIVED_STATE.roadsFailed = true;
@@ -3525,19 +3633,11 @@ async function loadOsRailOverlay() {
       "data/osm_derived/gb_rail_lines.geojson"
     ]);
     if (!picked) throw new Error("No OS rail dataset found");
-    OS_DERIVED_STATE.railLayer = L.geoJSON(picked.data, {
-      style: (f) => ({
-        color: osRailColorForFeature(f.properties || {}),
-        weight: 1.9,
-        opacity: 0.78
-      }),
-      onEachFeature: (f, l) => {
-        const name = f.properties?.name || "Rail Line";
-        const kind = f.properties?.railway || "";
-        l.bindTooltip(`${escapeHtml(name)}${kind ? ` (${escapeHtml(kind)})` : ""}`, { sticky: true, opacity: 0.88 });
-      }
-    }).addTo(layers.os_rail);
+    OS_DERIVED_STATE.railData = picked.data;
+    OS_DERIVED_STATE.railLayer = L.featureGroup().addTo(layers.os_rail);
     OS_DERIVED_STATE.railLoaded = true;
+    OS_DERIVED_STATE.railRenderSig = "";
+    renderOsRailOverlayViewport();
     setStatus(`OS rail overlay loaded (${picked.path.includes("_lite") ? "lite" : "full"}).`);
   } catch (err) {
     OS_DERIVED_STATE.railFailed = true;
@@ -4275,6 +4375,11 @@ async function addPersonToMap(officerName, address, companies = [], options = {}
     return null;
   }
 }
+
+map.on("moveend zoomend", () => {
+  if (map.hasLayer(layers.os_roads) && OS_DERIVED_STATE.roadsLoaded) scheduleOsRoadViewportRender();
+  if (map.hasLayer(layers.os_rail) && OS_DERIVED_STATE.railLoaded) scheduleOsRailViewportRender();
+});
 
 async function expandOfficerCompanies(entityId) {
   const entity = getEntityById(entityId);
