@@ -11,7 +11,7 @@ const OPENSKY = {
   trails: new Map(),    // icao24 -> [{lat,lon,ts}]
   snapshot: null,
   flightsCache: [],
-  filters: { passengerLargeOnly: true },
+  filters: { passengerLargeOnly: true, ukNexusOnly: true },
   markerByIcao: new Map(),
   lastData: null,
   selectedRouteLine: null,
@@ -45,6 +45,7 @@ const PLANE_SPRITE_FALLBACK = { col: 1, row: 2 };
 const UK_COUNTRY_KEYS = ["UNITED KINGDOM", "UK", "GREAT BRITAIN", "ENGLAND", "SCOTLAND", "WALES", "NORTHERN IRELAND"];
 const MILITARY_CALLSIGN_PREFIXES = ["RRR", "RCH", "ASY", "NATO", "QID", "MMF", "IAM", "CFC", "HAF", "BAF", "FAF", "USAF", "RAF"];
 const ADSB_LARGE_OR_HEAVY = new Set([3, 4, 5]);
+const UK_AOI = { lamin: 48.5, lamax: 61.5, lomin: -12.5, lomax: 6.0 };
 
 function pickPlaneSprite(altMetres) {
   if (altMetres == null || altMetres <= 0) return { col: 1, row: 0 };
@@ -111,6 +112,19 @@ function isLikelyPassengerOrLarge(flight) {
   const cat = parseEmitterCategory(flight.emitterCategory);
   if (cat != null && ADSB_LARGE_OR_HEAVY.has(cat)) return true;
   return looksLikeAirlineCallsign(flight.callsign);
+}
+
+function isLatLonInUkAoi(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  return lat >= UK_AOI.lamin && lat <= UK_AOI.lamax && lon >= UK_AOI.lomin && lon <= UK_AOI.lomax;
+}
+
+function hasUkNexus(flight) {
+  if (!flight) return false;
+  if (isUkCountry(flight.originAirport?.country)) return true;
+  if (isUkCountry(flight.destinationAirport?.country)) return true;
+  if (isUkCountry(flight.originCountry)) return true;
+  return isLatLonInUkAoi(flight.lat, flight.lon);
 }
 
 function classifyFlightType(flight) {
@@ -252,7 +266,8 @@ function hasActiveFlightFilters() {
     String(f.flightNumber || "").trim() ||
     String(f.fromTime || "").trim() ||
     String(f.toTime || "").trim() ||
-    !f.passengerLargeOnly
+    !f.passengerLargeOnly ||
+    !f.ukNexusOnly
   );
 }
 
@@ -568,8 +583,10 @@ function flightMatchesFilters(f, filters) {
   const fromMins = parseTimeInputMins(filters.fromTime);
   const toMins = parseTimeInputMins(filters.toTime);
   const passengerLargeOnly = filters.passengerLargeOnly !== false;
+  const ukNexusOnly = filters.ukNexusOnly !== false;
 
   if (passengerLargeOnly && !isLikelyPassengerOrLarge(f)) return false;
+  if (ukNexusOnly && !hasUkNexus(f)) return false;
 
   if (anyAirport) {
     const hitAny =
@@ -608,7 +625,8 @@ function currentFlightFiltersFromUi() {
     flightNumber: document.getElementById("flight-number-q")?.value || "",
     fromTime: document.getElementById("flight-time-from")?.value || "",
     toTime: document.getElementById("flight-time-to")?.value || "",
-    passengerLargeOnly: document.getElementById("flight-passenger-large-only")?.checked !== false
+    passengerLargeOnly: document.getElementById("flight-passenger-large-only")?.checked !== false,
+    ukNexusOnly: true
   };
 }
 
@@ -691,7 +709,7 @@ function clearFlightFilters() {
   });
   const focusFilter = document.getElementById("flight-passenger-large-only");
   if (focusFilter) focusFilter.checked = true;
-  OPENSKY.filters = { passengerLargeOnly: true };
+  OPENSKY.filters = { passengerLargeOnly: true, ukNexusOnly: true };
   if (OPENSKY.lastData) {
     renderFlights(OPENSKY.lastData);
   } else {
