@@ -17,7 +17,9 @@ const OPENSKY = {
   selectedRouteLine: null,
   selectedRouteMarkers: [],
   scheduleCache: new Map(),
-  opsCache: new Map()
+  opsCache: new Map(),
+  detailPanelEl: null,
+  detailDrag: null
 };
 
 // State vector field indices
@@ -321,7 +323,7 @@ function buildPlanePopupHtml(flight, trail, schedule = null, routeCtx = null) {
   const arrActualRaw = formatOpsTimeLabel(schedule?.flight?.arrival?.actual || null);
   const depPlanned = depPlannedRaw === "Unknown" ? "Not published" : depPlannedRaw;
   const depActual = depActualRaw === "Unknown" ? "Not published" : depActualRaw;
-  const arrPlanned = arrPlannedRaw === "Unknown" ? "Estimated from current track unavailable" : arrPlannedRaw;
+  const arrPlanned = arrPlannedRaw === "Unknown" ? "ETA unavailable" : arrPlannedRaw;
   const arrActual = arrActualRaw === "Unknown" ? "Not published" : arrActualRaw;
   const statusText = String(schedule?.flight?.status || "").trim() || getFlightLifecycleLabel(flight, ops.etaShiftMins);
   const classInfo = flight?.classification || classifyFlightType(flight);
@@ -331,28 +333,81 @@ function buildPlanePopupHtml(flight, trail, schedule = null, routeCtx = null) {
   const routeTrack = (trail || []).length >= 2 ? "Track confirmed" : "Track still forming";
 
   return (
-    `<div class="flight-intel-popup">` +
+    `<div class="flight-intel-popup compact">` +
       `<div class="flight-intel-head">` +
-        `<strong>${escapeHtml(callsign)}</strong> <span class="popup-tag">${escapeHtml(String(flight.icao24 || "").toUpperCase())}</span>` +
+        `<strong>${escapeHtml(callsign)}</strong> <span class="popup-tag">${escapeHtml(classInfo.label)}</span>` +
       `</div>` +
-      `<div class="flight-intel-meta">` +
-        `<span class="popup-label">Origin</span> ${escapeHtml(originLabel)}<br>` +
-        `<span class="popup-label">Destination</span> ${escapeHtml(destLabel)}<br>` +
-        `<span class="popup-label">Flight Code</span> ${escapeHtml(callsign)}<br>` +
-        `<span class="popup-label">Departure (planned)</span> ${escapeHtml(depPlanned)}<br>` +
-        `<span class="popup-label">Departure (actual)</span> ${escapeHtml(depActual)}<br>` +
-        `<span class="popup-label">Arrival (planned/ETA)</span> ${escapeHtml(arrPlanned)}<br>` +
-        `<span class="popup-label">Arrival (actual)</span> ${escapeHtml(arrActual)}<br>` +
-        `<span class="popup-label">Operational Status</span> ${escapeHtml(statusText)}<br>` +
-        `<span class="popup-label">Flight Type</span> ${escapeHtml(classInfo.label)}<br>` +
-        `<span class="popup-label">ETA Change</span> ${escapeHtml(etaShift)}` +
+      `<div class="flight-intel-route">${escapeHtml(originLabel)} -> ${escapeHtml(destLabel)}</div>` +
+      `<div class="flight-intel-grid">` +
+        `<div><span class="popup-label">ETA</span><br>${escapeHtml(arrPlanned)}</div>` +
+        `<div><span class="popup-label">Status</span><br>${escapeHtml(statusText)}</div>` +
+        `<div><span class="popup-label">ETA Delta</span><br>${escapeHtml(etaShift)}</div>` +
+        `<div><span class="popup-label">Track</span><br>${escapeHtml(routeTrack)}</div>` +
       `</div>` +
-      `<div class="flight-tracklist">` +
-        `<div class="flight-track-title">Route Status</div>` +
-        `<div class="flight-track-item"><span>${escapeHtml(routeTrack)}</span></div>` +
-      `</div>` +
+      `<details class="flight-intel-more">` +
+        `<summary>More</summary>` +
+        `<div class="flight-intel-meta">` +
+          `<span class="popup-label">ICAO24</span> ${escapeHtml(String(flight.icao24 || "").toUpperCase())}<br>` +
+          `<span class="popup-label">Departure planned</span> ${escapeHtml(depPlanned)}<br>` +
+          `<span class="popup-label">Departure actual</span> ${escapeHtml(depActual)}<br>` +
+          `<span class="popup-label">Arrival actual</span> ${escapeHtml(arrActual)}` +
+        `</div>` +
+      `</details>` +
     `</div>`
   );
+}
+
+function ensureFlightDetailPanel() {
+  if (OPENSKY.detailPanelEl) return OPENSKY.detailPanelEl;
+  const panel = document.createElement("div");
+  panel.id = "flight-detail-panel";
+  panel.className = "flight-detail-panel";
+  panel.style.display = "none";
+  panel.innerHTML =
+    `<div class="flight-detail-header">` +
+      `<span id="flight-detail-title">Flight Detail</span>` +
+      `<button type="button" id="flight-detail-close" class="flight-detail-close">x</button>` +
+    `</div>` +
+    `<div id="flight-detail-body" class="flight-detail-body"></div>`;
+  document.body.appendChild(panel);
+  OPENSKY.detailPanelEl = panel;
+
+  const closeBtn = panel.querySelector("#flight-detail-close");
+  closeBtn?.addEventListener("click", () => {
+    panel.style.display = "none";
+    clearSelectedFlightRoute();
+  });
+
+  const header = panel.querySelector(".flight-detail-header");
+  header?.addEventListener("mousedown", (e) => {
+    OPENSKY.detailDrag = {
+      x: e.clientX - panel.offsetLeft,
+      y: e.clientY - panel.offsetTop
+    };
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!OPENSKY.detailDrag || panel.style.display === "none") return;
+    panel.style.left = `${Math.max(8, e.clientX - OPENSKY.detailDrag.x)}px`;
+    panel.style.top = `${Math.max(8, e.clientY - OPENSKY.detailDrag.y)}px`;
+    panel.style.right = "auto";
+  });
+  document.addEventListener("mouseup", () => {
+    OPENSKY.detailDrag = null;
+  });
+  return panel;
+}
+
+function openFlightDetailPanel(flight, trail, schedule = null, routeCtx = null) {
+  const panel = ensureFlightDetailPanel();
+  const title = panel.querySelector("#flight-detail-title");
+  const body = panel.querySelector("#flight-detail-body");
+  if (title) title.textContent = flightPrimaryId(flight);
+  if (body) body.innerHTML = buildPlanePopupHtml(flight, trail, schedule, routeCtx);
+  if (!panel.style.left) {
+    panel.style.right = "12px";
+    panel.style.top = "88px";
+  }
+  panel.style.display = "";
 }
 
 function clearSelectedFlightRoute() {
@@ -839,17 +894,12 @@ function renderFlights(data) {
     const icon = createPlaneSpriteIcon(rotation, alt, flight.classification.code);
     const marker = L.marker([lat, lon], { icon });
     marker.bindTooltip(`${escapeHtml(callsign || icao || "Unknown")} - ${escapeHtml(flight.classification.label)}`, { direction: "top", opacity: 0.9 });
-
-    marker.bindPopup(buildPlanePopupHtml(flight, trail));
-    marker.on("popupopen", async () => {
+    marker.on("click", async () => {
       drawSelectedFlightRoute(flight);
       const schedule = await fetchFlightScheduleHints(flight);
       const routeCtx = getRouteContextFromSchedule(flight, schedule);
       drawSelectedFlightRoute(flight, routeCtx);
-      marker.setPopupContent(buildPlanePopupHtml(flight, trail, schedule, routeCtx));
-    });
-    marker.on("popupclose", () => {
-      clearSelectedFlightRoute();
+      openFlightDetailPanel(flight, trail, schedule, routeCtx);
     });
     marker.addTo(layers.flights);
     if (icao) OPENSKY.markerByIcao.set(icao, marker);
@@ -1036,8 +1086,7 @@ function stopFlightTracking() {
   clearSelectedFlightRoute();
   renderFlightFilterResults();
   updateFlightInfo(null, 0);
-  const panel = document.getElementById("flight-info");
-  if (panel) panel.style.display = "none";
+  if (OPENSKY.detailPanelEl) OPENSKY.detailPanelEl.style.display = "none";
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1045,10 +1094,7 @@ function stopFlightTracking() {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function initOpenSky() {
-  const refreshBtn = document.getElementById("flight-refresh-btn");
-  if (refreshBtn) {
-    refreshBtn.addEventListener("click", manualFlightRefresh);
-  }
+  ensureFlightDetailPanel();
 
   // Wire up the flights layer toggle
   const cb = document.querySelector('[data-layer="flights"]');

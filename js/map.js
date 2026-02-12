@@ -701,22 +701,67 @@ function defaultCategoryForI2Entity(entityTypeKey) {
 
   if (/(person|subject|individual|officer|witness|suspect|victim|alias)/.test(name)) return "people";
   if (/(operation|military|firearm|weapon|explosive|ordnance|mission|unit|sigint)/.test(name)) return "military";
-  if (/(location|address|site|premises|property|building|place|town|city|postcode)/.test(name)) return "buildings";
+  if (/(location|address|site|premises|property|building|place|town|city|postcode|port|airport|station)/.test(name)) return "buildings";
   if (/(aircraft|flight|aviation|airport|airline|helicopter)/.test(name)) return "aviation";
-  if (/(vehicle|car|van|truck|lorry|boat|vessel|ship|train)/.test(name)) return "vehicles";
+  if (/(vehicle|car|van|truck|lorry|boat|vessel|ship|train|bus|taxi|motor)/.test(name)) return "vehicles";
   if (/(organisation|organization|company|business|account|bank|finance|transaction)/.test(name)) return "financial";
-  if (/(communication|phone|email|mobile|device|call)/.test(name)) return "communication";
-  if (/(social|facebook|twitter|instagram|telegram|whatsapp|online|account)/.test(name)) return "social";
+  if (/(communication|phone|email|mobile|device|call|internet|ip|imsi|imei|number)/.test(name)) return "communication";
+  if (/(social|facebook|twitter|instagram|telegram|whatsapp|online|profile)/.test(name)) return "social";
   return "people";
+}
+
+function getI2EntityIconSearchText(entity) {
+  if (!entity) return "";
+  const props = Array.isArray(entity.properties) ? entity.properties : [];
+  const propNames = props.map((p) => String(p.property_name || p.property_id || ""));
+  return [
+    String(entity.entity_name || ""),
+    String(entity.entity_id || ""),
+    ...propNames
+  ].join(" ").toLowerCase();
+}
+
+function findBestIconForEntityText(categoryKey, searchText) {
+  const normalized = String(searchText || "").toLowerCase();
+  const categories = categoryKey && ICON_CATEGORIES[categoryKey]
+    ? [[categoryKey, ICON_CATEGORIES[categoryKey]]]
+    : Object.entries(ICON_CATEGORIES);
+
+  let best = null;
+  let bestScore = -1;
+  for (const [cid, cat] of categories) {
+    for (const icon of cat.icons) {
+      let score = 0;
+      for (const kw of icon.keywords || []) {
+        const token = String(kw || "").toLowerCase();
+        if (!token) continue;
+        if (normalized.includes(` ${token} `) || normalized.startsWith(`${token} `) || normalized.endsWith(` ${token}`) || normalized === token) {
+          score += 8;
+        } else if (normalized.includes(token)) {
+          score += 4;
+        }
+      }
+      if (categoryKey && cid === categoryKey) score += 2;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { category: cid, icon };
+      }
+    }
+  }
+  return bestScore > 0 ? best : null;
 }
 
 function chooseIconForI2Entity(entity) {
   const category = defaultCategoryForI2Entity(entity?.entity_id || entity?.entity_name || "") || "people";
   const catData = ICON_CATEGORIES[category] || ICON_CATEGORIES.people;
-  const suggested = suggestIcon(String(entity?.entity_name || ""), category);
-  if (suggested) {
-    const hit = catData.icons.find((ic) => ic.id === suggested.id || ic.name === suggested.name);
-    if (hit) return { category, icon: hit };
+  const searchText = getI2EntityIconSearchText(entity);
+  const bestInCategory = findBestIconForEntityText(category, searchText);
+  if (bestInCategory?.icon) {
+    return { category, icon: bestInCategory.icon };
+  }
+  const globalBest = findBestIconForEntityText("", searchText);
+  if (globalBest?.icon) {
+    return globalBest;
   }
   return { category, icon: catData.icons[0] };
 }
@@ -1329,7 +1374,9 @@ const ICON_CATEGORIES = {
       { id: 'house', name: 'House', icon: 'gfx/map_icons/buildings/house.png', keywords: ['house', 'home', 'residence'] },
       { id: 'office', name: 'Office Building', icon: 'gfx/map_icons/buildings/building.png', keywords: ['office', 'business'] },
       { id: 'mansion', name: 'Mansion', icon: 'gfx/map_icons/real_estate/mansion.png', keywords: ['mansion', 'estate', 'villa'] },
-      { id: 'factory', name: 'Factory', icon: 'gfx/map_icons/real_estate/factory.png', keywords: ['factory', 'industrial', 'plant'] }
+      { id: 'factory', name: 'Factory', icon: 'gfx/map_icons/real_estate/factory.png', keywords: ['factory', 'industrial', 'plant'] },
+      { id: 'bank_building', name: 'Bank Building', icon: 'gfx/map_icons/real_estate/bank.png', keywords: ['bank', 'branch'] },
+      { id: 'church', name: 'Church', icon: 'gfx/map_icons/real_estate/church.png', keywords: ['church', 'religious'] }
     ]
   },
   financial: {
@@ -1352,7 +1399,10 @@ const ICON_CATEGORIES = {
       { id: 'car', name: 'Car', icon: 'gfx/map_icons/cars/car.png', keywords: ['car', 'vehicle', 'auto'] },
       { id: 'police_car', name: 'Police Car', icon: 'gfx/map_icons/cars/police_car.png', keywords: ['police car', 'patrol'] },
       { id: 'ambulance', name: 'Ambulance', icon: 'gfx/map_icons/cars/ambulance.png', keywords: ['ambulance', 'emergency'] },
-      { id: 'truck', name: 'Truck', icon: 'gfx/map_icons/cars/truck.png', keywords: ['truck', 'lorry'] }
+      { id: 'truck', name: 'Truck', icon: 'gfx/map_icons/cars/truck.png', keywords: ['truck', 'lorry'] },
+      { id: 'taxi', name: 'Taxi', icon: 'gfx/map_icons/cars/taxi.png', keywords: ['taxi', 'cab'] },
+      { id: 'bus', name: 'Bus', icon: 'gfx/map_icons/cars/bus.png', keywords: ['bus', 'coach'] },
+      { id: 'van', name: 'Van', icon: 'gfx/map_icons/cars/minibus.png', keywords: ['van', 'minibus'] }
     ]
   },
   aviation: {
@@ -1364,7 +1414,8 @@ const ICON_CATEGORIES = {
       { id: 'airport', name: 'Airport/Terminal', icon: 'gfx/map_icons/buildings/building.png', keywords: ['airport', 'terminal', 'runway'] },
       { id: 'pilot', name: 'Pilot', icon: 'gfx/map_icons/people/pilot.png', keywords: ['pilot', 'captain'] },
       { id: 'captain', name: 'Captain', icon: 'gfx/map_icons/people/captain.png', keywords: ['captain'] },
-      { id: 'crew', name: 'Cabin Crew', icon: 'gfx/map_icons/people/stewardess.png', keywords: ['crew', 'steward', 'stewardess'] }
+      { id: 'crew', name: 'Cabin Crew', icon: 'gfx/map_icons/people/stewardess.png', keywords: ['crew', 'steward', 'stewardess'] },
+      { id: 'aircraft_large', name: 'Large Aircraft', icon: 'gfx/map_icons/email/paper_plane.png', keywords: ['widebody', 'boeing', 'airbus'] }
     ]
   },
   military: {
@@ -1387,7 +1438,10 @@ const ICON_CATEGORIES = {
     icons: [
       { id: 'chat', name: 'Chat', icon: 'gfx/map_icons/communication/chat.png', keywords: ['chat', 'message', 'conversation'] },
       { id: 'email', name: 'Email', icon: 'gfx/map_icons/communication/email.png', keywords: ['email', 'mail'] },
-      { id: 'sms', name: 'SMS', icon: 'gfx/map_icons/communication/sms.png', keywords: ['sms', 'text', 'message'] }
+      { id: 'sms', name: 'SMS', icon: 'gfx/map_icons/communication/sms.png', keywords: ['sms', 'text', 'message'] },
+      { id: 'mobile_phone', name: 'Mobile Phone', icon: 'gfx/map_icons/mobile_phone/mobile_phone.png', keywords: ['phone', 'handset', 'mobile'] },
+      { id: 'smartphone', name: 'Smartphone', icon: 'gfx/map_icons/mobile_phone/smartphone.png', keywords: ['smartphone', 'device'] },
+      { id: 'landline', name: 'Landline', icon: 'gfx/map_icons/mobile_phone/landline.png', keywords: ['landline', 'telephone'] }
     ]
   },
   social: {
