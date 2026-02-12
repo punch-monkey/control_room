@@ -1009,6 +1009,13 @@ function normalizePersonName(name) {
     .trim();
 }
 
+function formatCountryWithFlag(value) {
+  if (typeof window !== "undefined" && typeof window.formatCountryWithFlag === "function") {
+    return window.formatCountryWithFlag(value);
+  }
+  return String(value || "").trim();
+}
+
 function tokenSetFromName(name) {
   return new Set(
     normalizePersonName(name)
@@ -1246,9 +1253,11 @@ function renderPSCCard(psc, companyNumber, companyName) {
   `;
   
   if (psc.nationality || psc.country_of_residence) {
-    html += `<div class="psc-detail">`;
-    if (psc.nationality) html += `<span class="psc-label">Nationality:</span> ${escapeHtml(psc.nationality)} `;
-    if (psc.country_of_residence) html += `<span class="psc-label">Country:</span> ${escapeHtml(psc.country_of_residence)}`;
+    const nat = formatCountryWithFlag(psc.nationality || "");
+    const cor = formatCountryWithFlag(psc.country_of_residence || "");
+    html += `<div class="psc-detail psc-detail-flags">`;
+    if (nat) html += `<span class="psc-flag-chip"><span class="psc-label">Nationality</span> ${escapeHtml(nat)}</span> `;
+    if (cor) html += `<span class="psc-flag-chip"><span class="psc-label">Residence</span> ${escapeHtml(cor)}</span>`;
     html += `</div>`;
   }
   
@@ -1303,10 +1312,12 @@ function renderOfficerCard(officer, companyNumber, companyName) {
   `;
 
   if (dob || officer?.nationality || officer?.country_of_residence) {
-    html += `<div class="psc-detail">`;
+    const nat = formatCountryWithFlag(officer?.nationality || "");
+    const cor = formatCountryWithFlag(officer?.country_of_residence || "");
+    html += `<div class="psc-detail psc-detail-flags">`;
     if (dob) html += `<span class="psc-label">DOB:</span> ${escapeHtml(dob)} `;
-    if (officer?.nationality) html += `<span class="psc-label">Nationality:</span> ${escapeHtml(officer.nationality)} `;
-    if (officer?.country_of_residence) html += `<span class="psc-label">Country:</span> ${escapeHtml(officer.country_of_residence)}`;
+    if (nat) html += `<span class="psc-flag-chip"><span class="psc-label">Nationality</span> ${escapeHtml(nat)}</span> `;
+    if (cor) html += `<span class="psc-flag-chip"><span class="psc-label">Residence</span> ${escapeHtml(cor)}</span>`;
     html += `</div>`;
   }
   if (officer?.appointed_on) {

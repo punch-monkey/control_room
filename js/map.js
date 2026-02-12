@@ -2267,6 +2267,46 @@ function formatPartialDobValue(dob) {
   return "";
 }
 
+const COUNTRY_ALIAS_TO_ISO2 = {
+  "united kingdom": "GB", "uk": "GB", "great britain": "GB", "britain": "GB", "british": "GB", "england": "GB", "scotland": "GB", "wales": "GB", "northern ireland": "GB",
+  "united states": "US", "united states of america": "US", "usa": "US", "american": "US",
+  "ireland": "IE", "irish": "IE",
+  "france": "FR", "french": "FR", "germany": "DE", "german": "DE", "spain": "ES", "spanish": "ES", "italy": "IT", "italian": "IT",
+  "netherlands": "NL", "dutch": "NL", "belgium": "BE", "belgian": "BE", "switzerland": "CH", "swiss": "CH", "austria": "AT", "austrian": "AT",
+  "portugal": "PT", "portuguese": "PT", "poland": "PL", "polish": "PL", "romania": "RO", "romanian": "RO", "ukraine": "UA", "ukrainian": "UA",
+  "russia": "RU", "russian": "RU", "turkey": "TR", "turkish": "TR", "greece": "GR", "greek": "GR",
+  "india": "IN", "indian": "IN", "pakistan": "PK", "pakistani": "PK", "bangladesh": "BD", "bangladeshi": "BD", "china": "CN", "chinese": "CN", "japan": "JP", "japanese": "JP",
+  "south korea": "KR", "korean": "KR", "singapore": "SG", "singaporean": "SG", "hong kong": "HK",
+  "uae": "AE", "united arab emirates": "AE", "saudi arabia": "SA", "qatar": "QA", "kuwait": "KW", "oman": "OM",
+  "nigeria": "NG", "nigerian": "NG", "ghana": "GH", "ghanaian": "GH", "kenya": "KE", "kenyan": "KE", "south africa": "ZA", "south african": "ZA",
+  "canada": "CA", "canadian": "CA", "australia": "AU", "australian": "AU", "new zealand": "NZ", "new zealander": "NZ",
+  "brazil": "BR", "brazilian": "BR", "mexico": "MX", "mexican": "MX", "argentina": "AR", "argentine": "AR"
+};
+
+function countryToIso2(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const direct = raw.toUpperCase();
+  if (/^[A-Z]{2}$/.test(direct)) return direct;
+  const key = raw.toLowerCase().replace(/\s+/g, " ");
+  return COUNTRY_ALIAS_TO_ISO2[key] || "";
+}
+
+function countryFlagEmoji(value) {
+  const code = countryToIso2(value);
+  if (!code) return "";
+  const cps = [...code].map((c) => 127397 + c.charCodeAt(0));
+  return String.fromCodePoint(...cps);
+}
+
+function formatCountryWithFlag(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const flag = countryFlagEmoji(text);
+  return flag ? `${flag} ${text}` : text;
+}
+window.formatCountryWithFlag = formatCountryWithFlag;
+
 function buildEntityHoverTooltipHtml(entity) {
   if (!entity) return "";
   const values = entity.i2EntityData?.values || [];
@@ -2313,6 +2353,8 @@ function buildEntityPopup(entityId, entity) {
     const countryOfResidence =
       getI2ValueFromEntityValues(entity.i2EntityData, ["Country of Residence"]) ||
       String(entity.countryOfResidence || "");
+    const nationalityDisplay = formatCountryWithFlag(nationality);
+    const countryOfResidenceDisplay = formatCountryWithFlag(countryOfResidence);
     const role =
       getI2ValueFromEntityValues(entity.i2EntityData, ["Role", "Officer Role"]) ||
       String(entity.officerRole || "");
@@ -2325,8 +2367,8 @@ function buildEntityPopup(entityId, entity) {
       <strong>${escapeHtml(entity.label)}</strong>
       <span class="popup-label">Type</span> <span class="popup-tag" style="background:${entity.iconData.categoryColor || entity.iconData.color};">${escapeHtml(entity.iconData.categoryName || entity.iconData.name)}</span><br>
       ${dob ? `<span class="popup-label">DOB</span> ${escapeHtml(dob)}<br>` : ""}
-      ${nationality ? `<span class="popup-label">Nationality</span> ${escapeHtml(nationality)}<br>` : ""}
-      ${countryOfResidence ? `<span class="popup-label">Country of Residence</span> ${escapeHtml(countryOfResidence)}<br>` : ""}
+      ${nationalityDisplay ? `<span class="popup-label">Nationality</span> <span class="popup-flag-chip">${escapeHtml(nationalityDisplay)}</span><br>` : ""}
+      ${countryOfResidenceDisplay ? `<span class="popup-label">Country of Residence</span> <span class="popup-flag-chip">${escapeHtml(countryOfResidenceDisplay)}</span><br>` : ""}
       <details class="popup-more-details">
         <summary>See more</summary>
         ${detailRows.join("<br>")}
