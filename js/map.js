@@ -2826,6 +2826,54 @@ function notifyOsDerivedUnavailableOnce(message) {
   setStatus(message || "OS-derived overlays unavailable in this build.");
 }
 
+const OS_ROAD_BASE_COLOURS = {
+  motorway: "#f97316",
+  trunk: "#f59e0b",
+  primary: "#eab308",
+  secondary: "#d97706",
+  tertiary: "#fb923c"
+};
+
+function hashStringToInt(input) {
+  const s = String(input || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function tweakHexColor(hex, delta = 0) {
+  const clean = String(hex || "").replace("#", "");
+  if (clean.length !== 6) return hex || "#94a3b8";
+  const n = parseInt(clean, 16);
+  let r = (n >> 16) & 255;
+  let g = (n >> 8) & 255;
+  let b = n & 255;
+  const d = Math.max(-50, Math.min(50, delta));
+  r = Math.max(0, Math.min(255, r + d));
+  g = Math.max(0, Math.min(255, g + d));
+  b = Math.max(0, Math.min(255, b + d));
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function osRoadColorForFeature(properties = {}) {
+  const highway = String(properties.highway || "").toLowerCase();
+  const name = String(properties.name || "");
+  const motorwayId = (name.match(/\bM\d{1,3}\b/i) || [])[0] || "";
+  const key = motorwayId || name || highway || "road";
+  const base = OS_ROAD_BASE_COLOURS[highway] || "#fb923c";
+  const shade = (hashStringToInt(key) % 5) * 10 - 20;
+  return tweakHexColor(base, shade);
+}
+
+function osRailColorForFeature(properties = {}) {
+  const name = String(properties.name || "").trim();
+  const key = name || String(properties.railway || "rail");
+  const hue = hashStringToInt(key) % 360;
+  return `hsl(${hue} 72% 62%)`;
+}
+
 async function fetchGeoJsonFromCandidates(paths) {
   for (const p of paths) {
     try {
@@ -2853,11 +2901,11 @@ async function loadOsRoadOverlay() {
     ]);
     if (!picked) throw new Error("No OS road dataset found");
     OS_DERIVED_STATE.roadsLayer = L.geoJSON(picked.data, {
-      style: {
-        color: "#fb923c",
+      style: (f) => ({
+        color: osRoadColorForFeature(f.properties || {}),
         weight: 1.8,
-        opacity: 0.62
-      },
+        opacity: 0.68
+      }),
       onEachFeature: (f, l) => {
         const name = f.properties?.name || "Major Road";
         const type = f.properties?.highway || "";
@@ -2887,11 +2935,11 @@ async function loadOsRailOverlay() {
     ]);
     if (!picked) throw new Error("No OS rail dataset found");
     OS_DERIVED_STATE.railLayer = L.geoJSON(picked.data, {
-      style: {
-        color: "#60a5fa",
+      style: (f) => ({
+        color: osRailColorForFeature(f.properties || {}),
         weight: 1.9,
-        opacity: 0.75
-      },
+        opacity: 0.78
+      }),
       onEachFeature: (f, l) => {
         const name = f.properties?.name || "Rail Line";
         const kind = f.properties?.railway || "";
