@@ -1029,6 +1029,17 @@ body {
   line-height: 1.45;
 }
 
+#entity-select-box[aria-pressed="true"] {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.38);
+  color: #86efac;
+}
+
+.entity-selected-marker {
+  filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.8)) drop-shadow(0 0 14px rgba(34, 197, 94, 0.45));
+  transform: scale(1.06);
+}
+
 /* Entity Grid */
 .entity-grid {
   display: grid;

@@ -553,6 +553,141 @@ const layers = {
 window._mapConnections = [];
 window._mapEntities = [];
 window._placementMode = null;
+window._selectedEntityIds = new Set();
+
+let entityBoxSelectMode = false;
+let entityBoxSelectStart = null;
+let entityBoxSelectRect = null;
+let entityBoxSelectDragging = false;
+
+function isEditingInputTarget(target) {
+  if (!target || !target.tagName) return false;
+  const tag = String(target.tagName).toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+function setEntityMarkerSelectedState(entity, selected) {
+  if (!entity?.marker?.getElement) return;
+  const el = entity.marker.getElement();
+  if (!el) return;
+  el.classList.toggle("entity-selected-marker", !!selected);
+}
+
+function refreshEntitySelectionStyles() {
+  window._mapEntities.forEach((entity) => {
+    setEntityMarkerSelectedState(entity, window._selectedEntityIds.has(entity.id));
+  });
+}
+
+function clearEntitySelection() {
+  window._selectedEntityIds.clear();
+  refreshEntitySelectionStyles();
+}
+
+function selectAllEntities() {
+  window._selectedEntityIds.clear();
+  window._mapEntities.forEach((entity) => window._selectedEntityIds.add(entity.id));
+  refreshEntitySelectionStyles();
+  setStatus(`Selected ${window._selectedEntityIds.size} entities`);
+}
+
+function applyEntitySelectionBounds(bounds, additive = false) {
+  if (!bounds) return;
+  if (!additive) window._selectedEntityIds.clear();
+  window._mapEntities.forEach((entity) => {
+    const latLng = L.latLng(entity.latLng[0], entity.latLng[1]);
+    if (bounds.contains(latLng)) window._selectedEntityIds.add(entity.id);
+  });
+  refreshEntitySelectionStyles();
+  setStatus(`Selected ${window._selectedEntityIds.size} entities`);
+}
+
+function toggleEntityBoxSelectMode(nextState = null) {
+  entityBoxSelectMode = (nextState == null) ? !entityBoxSelectMode : !!nextState;
+  if (!entityBoxSelectMode) {
+    entityBoxSelectStart = null;
+    entityBoxSelectDragging = false;
+    if (entityBoxSelectRect) {
+      map.removeLayer(entityBoxSelectRect);
+      entityBoxSelectRect = null;
+    }
+  }
+  const btn = document.getElementById("entity-select-box");
+  if (btn) btn.setAttribute("aria-pressed", entityBoxSelectMode ? "true" : "false");
+  map.getContainer().style.cursor = entityBoxSelectMode ? "crosshair" : "";
+  if (entityBoxSelectMode) setStatus("Box select enabled: drag on map to select entities");
+}
+
+function exportEntitiesToExcel() {
+  if (!window.XLSX) {
+    alert("Excel export library unavailable. Refresh and try again.");
+    return;
+  }
+
+  const selectedIds = Array.from(window._selectedEntityIds || []);
+  const selectedSet = new Set(selectedIds);
+  const exportingSelected = selectedIds.length > 0;
+  const entities = exportingSelected
+    ? window._mapEntities.filter((e) => selectedSet.has(e.id))
+    : [...window._mapEntities];
+
+  if (!entities.length) {
+    alert("No entities available to export.");
+    return;
+  }
+
+  const entityRows = entities.map((entity) => {
+    const row = {
+      EntityID: entity.id,
+      Label: entity.label || "",
+      SourceType: entity.sourceType || "",
+      Category: entity.iconData?.categoryName || "",
+      Icon: entity.iconData?.name || "",
+      I2Type: entity.i2EntityData?.entityName || "",
+      I2EntityID: entity.i2EntityData?.entityId || "",
+      Address: entity.address || "",
+      Notes: entity.notes || "",
+      Lat: Number(entity.latLng?.[0] || 0),
+      Lng: Number(entity.latLng?.[1] || 0)
+    };
+    (entity.i2EntityData?.values || []).forEach((v) => {
+      if (!v?.propertyName) return;
+      row[`I2:${v.propertyName}`] = String(v.value ?? "");
+    });
+    return row;
+  });
+
+  const exportedIdSet = new Set(entities.map((e) => e.id));
+  const connectionRows = (window._mapConnections || [])
+    .filter((c) => c?.metadata?.fromId && c?.metadata?.toId)
+    .filter((c) => exportedIdSet.has(c.metadata.fromId) && exportedIdSet.has(c.metadata.toId))
+    .map((c) => ({
+      ConnectionID: c.id,
+      Type: c.type || "",
+      Label: c.label || "",
+      FromEntityID: c.metadata.fromId || "",
+      FromLabel: c.metadata.fromLabel || "",
+      ToEntityID: c.metadata.toId || "",
+      ToLabel: c.metadata.toLabel || "",
+      Detail: c.metadata.hoverDetail || ""
+    }));
+
+  const wb = window.XLSX.utils.book_new();
+  const wsEntities = window.XLSX.utils.json_to_sheet(entityRows);
+  window.XLSX.utils.book_append_sheet(wb, wsEntities, "Entities");
+  if (connectionRows.length) {
+    const wsLinks = window.XLSX.utils.json_to_sheet(connectionRows);
+    window.XLSX.utils.book_append_sheet(wb, wsLinks, "Connections");
+  }
+
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const fileName = `${yyyy}${mm}${dd} - Control Room - Entity Export.xlsx`;
+  window.XLSX.writeFile(wb, fileName);
+  setStatus(`Exported ${entities.length} entities to ${fileName}`);
+}
 
 // Companies starts ON (checked in HTML)
 companyCluster.addTo(map);
@@ -585,6 +720,7 @@ companyCluster.on('clusterclick', function(e) {
 
 // Entity click handler for connection drawing
 map.on('click', function(e) {
+  if (entityBoxSelectMode) return;
   if (connectionDrawingMode) {
     // Check if clicked on an entity
     const clickedEntity = window._mapEntities.find(ent => {
@@ -609,6 +745,43 @@ map.on('click', function(e) {
       document.dispatchEvent(new CustomEvent("tfl-line-selection-changed", { detail: { lineId: null } }));
     }
   }
+});
+
+map.on("mousedown", function(e) {
+  if (!entityBoxSelectMode) return;
+  entityBoxSelectStart = e.latlng;
+  entityBoxSelectDragging = true;
+  if (entityBoxSelectRect) {
+    map.removeLayer(entityBoxSelectRect);
+    entityBoxSelectRect = null;
+  }
+  entityBoxSelectRect = L.rectangle(L.latLngBounds(entityBoxSelectStart, entityBoxSelectStart), {
+    color: "#22c55e",
+    weight: 1.5,
+    fillColor: "#22c55e",
+    fillOpacity: 0.08,
+    dashArray: "4 4"
+  }).addTo(map);
+});
+
+map.on("mousemove", function(e) {
+  if (!entityBoxSelectMode || !entityBoxSelectDragging || !entityBoxSelectRect || !entityBoxSelectStart) return;
+  entityBoxSelectRect.setBounds(L.latLngBounds(entityBoxSelectStart, e.latlng));
+});
+
+map.on("mouseup", function(e) {
+  if (!entityBoxSelectMode || !entityBoxSelectDragging || !entityBoxSelectStart) return;
+  const bounds = L.latLngBounds(entityBoxSelectStart, e.latlng);
+  entityBoxSelectDragging = false;
+  entityBoxSelectStart = null;
+  if (entityBoxSelectRect) {
+    map.removeLayer(entityBoxSelectRect);
+    entityBoxSelectRect = null;
+  }
+  if (bounds.isValid()) {
+    applyEntitySelectionBounds(bounds, e.originalEvent?.ctrlKey || e.originalEvent?.metaKey);
+  }
+  toggleEntityBoxSelectMode(false);
 });
 
 function showEntityPlacementDialog(latLng) {
@@ -1768,7 +1941,20 @@ function applyMilitarySelectionToForm(selection) {
 // CONNECTION MANAGEMENT
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+function normalizeConnectionLabel(label) {
+  const raw = String(label || "").trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (/(company\s+secretary|secretary)/i.test(raw)) return "Company Secretary";
+  if (/(director|managing director)/i.test(raw)) return "Director";
+  if (/(llp member|designated member)/i.test(raw)) return "Designated Member";
+  if (/(owner|beneficial owner)/i.test(raw)) return "Owner";
+  if (/(ownership|voting|shares|right to appoint|significant influence|control)/i.test(lower)) return "PSC";
+  return raw.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 function addConnection(fromLatLng, toLatLng, label, type = 'officer', metadata = {}) {
+  label = normalizeConnectionLabel(label);
   const connectionId = `conn_${Date.now()}_${Math.random()}`;
   const from = normalizeLatLng(fromLatLng);
   const to = normalizeLatLng(toLatLng);
@@ -2365,6 +2551,7 @@ function removeEntity(entityId) {
   const idx = window._mapEntities.findIndex(e => e.id === entityId);
   if (idx >= 0) {
     const entity = window._mapEntities[idx];
+    window._selectedEntityIds.delete(entityId);
     entitiesMarkerCluster.removeLayer(entity.marker);
     window._mapEntities.splice(idx, 1);
     if (window._companyEntityIndex) {
@@ -2411,6 +2598,7 @@ function editEntityLabel(entityId) {
 }
 
 function clearAllEntities() {
+  clearEntitySelection();
   window._mapEntities.forEach(entity => {
     entitiesMarkerCluster.removeLayer(entity.marker);
   });
@@ -2543,21 +2731,21 @@ function editConnection(connectionId) {
   const newLabel = prompt('Connection label:', conn.label || '');
   if (newLabel === null) return;
   
-  conn.label = newLabel.trim();
+  conn.label = normalizeConnectionLabel(newLabel.trim());
   
   // Update label marker
   if (conn.labelMarker) {
     connectionsLayer.removeLayer(conn.labelMarker);
   }
   
-  if (newLabel.trim()) {
+  if (conn.label) {
     const coords = conn.line.getLatLngs();
     const midLat = (coords[0].lat + coords[1].lat) / 2;
     const midLng = (coords[0].lng + coords[1].lng) / 2;
     
     const labelIcon = L.divIcon({
       className: 'connection-label',
-      html: `<div class="connection-label-text">${escapeHtml(newLabel)}</div>`,
+      html: `<div class="connection-label-text">${escapeHtml(conn.label)}</div>`,
       iconSize: [150, 30],
       iconAnchor: [75, 15]
     });
@@ -3898,7 +4086,8 @@ async function addCompanyToMap(companyNumber, companyName, personName = '', pers
     if (personLatLng && appointmentInfo) {
       const role = appointmentInfo.officer_role || 'officer';
       const appointedOn = appointmentInfo.appointed_on || '';
-      const label = appointedOn ? `${role} since ${appointedOn}` : role;
+      const normalizedRole = normalizeConnectionLabel(role);
+      const label = appointedOn ? `${normalizedRole} since ${appointedOn}` : normalizedRole;
       addConnection(personLatLng, companyLatLng, label, 'officer');
     }
     
@@ -4331,6 +4520,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const entityImportRunBtn = document.getElementById('entity-import-run');
   const entityImportTemplateBtn = document.getElementById('entity-import-template');
   const entityImportClearBtn = document.getElementById('entity-import-clear');
+  const entitySelectBoxBtn = document.getElementById('entity-select-box');
+  const entitySelectAllBtn = document.getElementById('entity-select-all');
+  const entityExportExcelBtn = document.getElementById('entity-export-excel');
   const entityImportPanel = document.querySelector('.entity-import-panel');
   
   // Category change handler
@@ -4538,6 +4730,21 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     clearImportedEntities();
+  });
+
+  entitySelectBoxBtn?.addEventListener('click', () => toggleEntityBoxSelectMode());
+  entitySelectAllBtn?.addEventListener('click', () => selectAllEntities());
+  entityExportExcelBtn?.addEventListener('click', () => exportEntitiesToExcel());
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && String(e.key || '').toLowerCase() === 'a') {
+      if (isEditingInputTarget(e.target)) return;
+      e.preventDefault();
+      selectAllEntities();
+    }
+    if (String(e.key || "") === "Escape" && entityBoxSelectMode) {
+      toggleEntityBoxSelectMode(false);
+    }
   });
 
   const resultsDiv = document.getElementById("ch_results");
