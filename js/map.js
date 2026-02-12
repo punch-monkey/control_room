@@ -2797,8 +2797,32 @@ const OS_DERIVED_STATE = {
   roadsLoaded: false,
   railLoaded: false,
   roadsFailed: false,
-  railFailed: false
+  railFailed: false,
+  warned: false
 };
+
+function markOsDerivedLayerUnavailable(layerKey, reason = "") {
+  const cb = document.querySelector(`.layer-cb[data-layer="${layerKey}"]`);
+  if (cb) {
+    cb.checked = false;
+    cb.disabled = true;
+    const row = cb.closest(".layer-row");
+    if (row) {
+      row.classList.add("layer-row-disabled");
+      const nameEl = row.querySelector(".layer-name");
+      if (nameEl && !String(nameEl.textContent || "").includes("(unavailable)")) {
+        nameEl.textContent = `${nameEl.textContent} (unavailable)`;
+      }
+      row.title = reason || "Layer data unavailable";
+    }
+  }
+}
+
+function notifyOsDerivedUnavailableOnce(message) {
+  if (OS_DERIVED_STATE.warned) return;
+  OS_DERIVED_STATE.warned = true;
+  setStatus(message || "OS-derived overlays unavailable in this build.");
+}
 
 async function loadOsRoadOverlay() {
   if (OS_DERIVED_STATE.roadsLoaded || OS_DERIVED_STATE.roadsFailed) return;
@@ -2822,7 +2846,8 @@ async function loadOsRoadOverlay() {
   } catch (err) {
     OS_DERIVED_STATE.roadsFailed = true;
     console.warn("OS major roads overlay unavailable:", err);
-    setStatus("OS major roads overlay not found. Run OSM extraction to enable.");
+    markOsDerivedLayerUnavailable("os_roads", "OS roads overlay data is not available.");
+    notifyOsDerivedUnavailableOnce("OS-derived overlays unavailable in this build.");
   }
 }
 
@@ -2848,7 +2873,8 @@ async function loadOsRailOverlay() {
   } catch (err) {
     OS_DERIVED_STATE.railFailed = true;
     console.warn("OS rail overlay unavailable:", err);
-    setStatus("OS rail overlay not found. Run OSM extraction to enable.");
+    markOsDerivedLayerUnavailable("os_rail", "OS rail overlay data is not available.");
+    notifyOsDerivedUnavailableOnce("OS-derived overlays unavailable in this build.");
   }
 }
 

@@ -519,6 +519,10 @@ body {
   gap: 10px;
 }
 
+.layer-row-disabled {
+  opacity: 0.55;
+}
+
 #status-text {
   white-space: nowrap;
   overflow: hidden;
