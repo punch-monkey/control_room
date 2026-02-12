@@ -2400,8 +2400,9 @@ function detectImportColumns(headers) {
     if (!out.lat && /^(lat|latitude|y)$/.test(h)) out.lat = raw;
     if (!out.lon && /^(lon|lng|longitude|x)$/.test(h)) out.lon = raw;
     if (!out.entityType && /^(entity_type|type|i2_type|category)$/.test(h)) out.entityType = raw;
-    if (!out.target && /^(linked_to|associate|target|to|connection_to|related_to|company|organisation|organization)$/.test(h)) out.target = raw;
-    if (!out.relation && /^(relation|relationship|link|edge|association|role)$/.test(h)) out.relation = raw;
+    if (!out.target && /^(linked_to|linked_entity|associate|target|to|connection_to|related_to|link_to|company|organisation|organization|linked_company)$/.test(h)) out.target = raw;
+    // Support both "Relationship" and shorthand "Link Type"/"Role" style columns.
+    if (!out.relation && /^(relation|relationship|link|link_type|edge|association|role)$/.test(h)) out.relation = raw;
     if (!out.notes && /^(notes|comment|description|intel|intelligence)$/.test(h)) out.notes = raw;
   }
   return out;
@@ -2427,7 +2428,8 @@ function extractNameFromMixedText(text) {
 function inferEntityKind(row, cols) {
   const typeText = String(row[cols.entityType] || "").toLowerCase();
   if (typeText.includes("person") || typeText.includes("subject")) return "person";
-  if (typeText.includes("address") || typeText.includes("location") || typeText.includes("organisation") || typeText.includes("organization")) return "location";
+  if (typeText.includes("organisation") || typeText.includes("organization") || typeText.includes("company")) return "organisation";
+  if (typeText.includes("address") || typeText.includes("location")) return "location";
   if (typeText.includes("phone") || typeText.includes("msisdn") || typeText.includes("imei") || typeText.includes("imsi") || typeText.includes("email")) return "communication";
 
   const hasDob = !!(row[cols.dob] || parseDobFromText(row[cols.name]));
@@ -2440,6 +2442,7 @@ function inferEntityKind(row, cols) {
 function pickIconForImport(kind, label) {
   let categoryKey = "people";
   if (kind === "location") categoryKey = "buildings";
+  if (kind === "organisation") categoryKey = "financial";
   if (kind === "communication") categoryKey = "communication";
   if (kind === "generic") {
     const suggestedAny = suggestIcon(label || "");
