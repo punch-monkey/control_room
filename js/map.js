@@ -2423,25 +2423,94 @@ function buildOfficerI2EntityData(personData = {}) {
   };
 }
 
+function normalizeOfficerNameKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeDobKey(value) {
+  return formatPartialDobValue(value || "").trim().toUpperCase();
+}
+
+function buildOfficerEntityKeys(personData = {}) {
+  const nameKey = normalizeOfficerNameKey(personData.name);
+  const postcodeKey = String(personData.postcode || "").trim().toUpperCase();
+  const officerIdKey = String(personData.officerId || "").trim();
+  const dobKey = normalizeDobKey(personData.dob);
+  return {
+    nameKey,
+    postcodeKey,
+    officerIdKey,
+    namePostcodeKey: nameKey && postcodeKey ? `${nameKey}|${postcodeKey}` : "",
+    nameDobKey: nameKey && dobKey ? `${nameKey}|${dobKey}` : ""
+  };
+}
+
+function mergeOfficerEntityData(existing, personData = {}) {
+  if (!existing) return;
+  if (!existing.officerId && personData.officerId) existing.officerId = personData.officerId;
+  if (!existing.countryOfResidence && personData.countryOfResidence) existing.countryOfResidence = personData.countryOfResidence;
+  if (!existing.nationality && personData.nationality) existing.nationality = personData.nationality;
+  if (!existing.dob && personData.dob) existing.dob = personData.dob;
+  if (!existing.officerRole && personData.relationship) existing.officerRole = personData.relationship;
+  if (!existing.companyName && personData.companyName) existing.companyName = String(personData.companyName);
+  if (!existing.companyNumber && personData.companyNumber) existing.companyNumber = String(personData.companyNumber);
+  if (!existing.notes && personData.notes) existing.notes = String(personData.notes);
+  if (!existing.address && personData.address) existing.address = String(personData.address);
+  existing.i2EntityData = buildOfficerI2EntityData({
+    name: existing.label || personData.name || "",
+    dob: existing.dob || personData.dob || "",
+    nationality: existing.nationality || personData.nationality || "",
+    countryOfResidence: existing.countryOfResidence || personData.countryOfResidence || "",
+    relationship: existing.officerRole || personData.relationship || "",
+    address: existing.address || personData.address || "",
+    postcode: personData.postcode || ""
+  });
+}
+
+function findExistingOfficerEntityId(personData = {}) {
+  const keys = buildOfficerEntityKeys(personData);
+  if (!window._officerEntityIndex) window._officerEntityIndex = {};
+  if (!window._officerEntityByOfficerId) window._officerEntityByOfficerId = {};
+  if (!window._officerEntityByNameDob) window._officerEntityByNameDob = {};
+
+  let entityId = "";
+  if (keys.officerIdKey) entityId = window._officerEntityByOfficerId[keys.officerIdKey] || "";
+  if (!entityId && keys.nameDobKey) entityId = window._officerEntityByNameDob[keys.nameDobKey] || "";
+  if (!entityId && keys.namePostcodeKey) entityId = window._officerEntityIndex[keys.namePostcodeKey] || "";
+
+  if (!entityId) return null;
+  const existing = getEntityById(entityId);
+  return existing ? entityId : null;
+}
+
+function upsertOfficerEntityIndexes(entityId, personData = {}) {
+  if (!entityId) return;
+  const keys = buildOfficerEntityKeys(personData);
+  if (!window._officerEntityIndex) window._officerEntityIndex = {};
+  if (!window._officerEntityByOfficerId) window._officerEntityByOfficerId = {};
+  if (!window._officerEntityByNameDob) window._officerEntityByNameDob = {};
+  if (keys.namePostcodeKey) window._officerEntityIndex[keys.namePostcodeKey] = entityId;
+  if (keys.officerIdKey) window._officerEntityByOfficerId[keys.officerIdKey] = entityId;
+  if (keys.nameDobKey) window._officerEntityByNameDob[keys.nameDobKey] = entityId;
+}
+
 function registerOfficerMarkerAsEntity(marker, personData = {}) {
   if (!marker) return null;
-  const nameKey = String(personData.name || "").trim().toLowerCase();
-  const postcodeKey = String(personData.postcode || "").trim().toUpperCase();
-  if (!nameKey) return null;
-  if (!window._officerEntityIndex) window._officerEntityIndex = {};
-  const dedupeKey = `${nameKey}|${postcodeKey}`;
-  const existingId = window._officerEntityIndex[dedupeKey];
+  const keys = buildOfficerEntityKeys(personData);
+  if (!keys.nameKey) return null;
+  const existingId = findExistingOfficerEntityId(personData);
   if (existingId) {
     const existing = getEntityById(existingId);
     if (existing) {
-      if (!existing.officerId && personData.officerId) existing.officerId = personData.officerId;
-      if (!existing.countryOfResidence && personData.countryOfResidence) existing.countryOfResidence = personData.countryOfResidence;
-      if (!existing.nationality && personData.nationality) existing.nationality = personData.nationality;
-      if (!existing.dob && personData.dob) existing.dob = personData.dob;
-      if (!existing.officerRole && personData.relationship) existing.officerRole = personData.relationship;
-      if (!existing.companyName && personData.companyName) existing.companyName = String(personData.companyName);
-      if (!existing.companyNumber && personData.companyNumber) existing.companyNumber = String(personData.companyNumber);
-      if (!existing.notes && personData.notes) existing.notes = String(personData.notes);
+      mergeOfficerEntityData(existing, personData);
+      upsertOfficerEntityIndexes(existingId, {
+        name: existing.label || personData.name,
+        postcode: personData.postcode,
+        officerId: existing.officerId || personData.officerId,
+        dob: existing.dob || personData.dob
+      });
+      existing.marker.setPopupContent(buildEntityPopup(existingId, existing));
+      bindEntityHoverTooltip(existing.marker, existing);
       marker.bindPopup(buildEntityPopup(existingId, existing));
       marker._entityId = existingId;
       bindEntityHoverTooltip(marker, existing);
@@ -2473,7 +2542,7 @@ function registerOfficerMarkerAsEntity(marker, personData = {}) {
   marker._entityId = entityId;
   bindEntityHoverTooltip(marker, entity);
   window._mapEntities.push(entity);
-  window._officerEntityIndex[dedupeKey] = entityId;
+  upsertOfficerEntityIndexes(entityId, personData);
   updateDashboardCounts();
   return entityId;
 }
@@ -2611,6 +2680,14 @@ function refreshConnectionsForEntity(entityId) {
   });
 }
 
+function hasPscAutoConnection(fromId, toId) {
+  if (!fromId || !toId || !Array.isArray(window._mapConnections)) return false;
+  return window._mapConnections.some((c) => {
+    const md = c?.metadata || {};
+    return md.source === "psc_auto" && md.fromId === fromId && md.toId === toId;
+  });
+}
+
 function placeEntity(latLng, iconData, label = '', address = '', notes = '', i2EntityData = null) {
   const entityId = `entity_${Date.now()}_${Math.random()}`;
   const coords = normalizeLatLng(latLng);
@@ -2683,6 +2760,16 @@ function removeEntity(entityId) {
     if (window._officerEntityIndex) {
       Object.keys(window._officerEntityIndex).forEach((k) => {
         if (window._officerEntityIndex[k] === entityId) delete window._officerEntityIndex[k];
+      });
+    }
+    if (window._officerEntityByOfficerId) {
+      Object.keys(window._officerEntityByOfficerId).forEach((k) => {
+        if (window._officerEntityByOfficerId[k] === entityId) delete window._officerEntityByOfficerId[k];
+      });
+    }
+    if (window._officerEntityByNameDob) {
+      Object.keys(window._officerEntityByNameDob).forEach((k) => {
+        if (window._officerEntityByNameDob[k] === entityId) delete window._officerEntityByNameDob[k];
       });
     }
     setStatus('Entity removed');
@@ -4364,18 +4451,7 @@ async function addPersonToMap(officerName, address, companies = [], options = {}
       personLatLng = offsetLatLngFromAnchor(options.anchorLatLng, 0);
     }
 
-    const officerIconData = getOfficerEntityIconData();
-    const marker = L.marker(personLatLng, {
-      icon: L.icon({
-        iconUrl: officerIconData.icon,
-        iconSize: [30, 30],
-        iconAnchor: [15, 15],
-        popupAnchor: [0, -14]
-      }),
-      draggable: true
-    });
-    marker.addTo(entitiesMarkerCluster);
-    const personEntityId = registerOfficerMarkerAsEntity(marker, {
+    const personPayload = {
       name: officerName,
       address: addrString,
       postcode,
@@ -4388,7 +4464,55 @@ async function addPersonToMap(officerName, address, companies = [], options = {}
       officerId: options?.officerId || "",
       companyName: resolvedCompanyName,
       companyNumber: options?.companyNumber || ""
+    };
+    const existingOfficerId = findExistingOfficerEntityId(personPayload);
+    if (existingOfficerId) {
+      const existingEntity = getEntityById(existingOfficerId);
+      if (existingEntity) {
+        mergeOfficerEntityData(existingEntity, personPayload);
+        upsertOfficerEntityIndexes(existingOfficerId, {
+          name: existingEntity.label || personPayload.name,
+          postcode: personPayload.postcode,
+          officerId: existingEntity.officerId || personPayload.officerId,
+          dob: existingEntity.dob || personPayload.dob
+        });
+        existingEntity.marker.setPopupContent(buildEntityPopup(existingOfficerId, existingEntity));
+        bindEntityHoverTooltip(existingEntity.marker, existingEntity);
+        if (linkedCompanyEntity && personPayload.relationship && !hasPscAutoConnection(existingOfficerId, linkedCompanyEntity.id)) {
+          addConnection(
+            existingEntity.latLng,
+            linkedCompanyEntity.latLng,
+            personPayload.relationship,
+            "officer",
+            {
+              fromId: existingOfficerId,
+              toId: linkedCompanyEntity.id,
+              fromLabel: existingEntity.label,
+              toLabel: linkedCompanyEntity.label,
+              source: "psc_auto",
+              hoverDetail: String(options?.relationshipDetail || "").trim()
+            }
+          );
+        }
+        map.panTo(existingEntity.latLng);
+        existingEntity.marker.openPopup();
+        setStatus(`Matched existing person: ${existingEntity.label}`);
+        return { marker: existingEntity.marker, latLng: existingEntity.latLng, entityId: existingOfficerId, reused: true };
+      }
+    }
+
+    const officerIconData = getOfficerEntityIconData();
+    const marker = L.marker(personLatLng, {
+      icon: L.icon({
+        iconUrl: officerIconData.icon,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -14]
+      }),
+      draggable: true
     });
+    marker.addTo(entitiesMarkerCluster);
+    const personEntityId = registerOfficerMarkerAsEntity(marker, personPayload);
     const popup = personEntityId
       ? buildEntityPopup(personEntityId, getEntityById(personEntityId))
       : (
@@ -4423,7 +4547,7 @@ async function addPersonToMap(officerName, address, companies = [], options = {}
     marker._personData = { name: officerName, companies: companies, latLng: personLatLng };
     
     const relationshipLabel = String(options.relationship || "").trim();
-    if (personEntityId && linkedCompanyEntity && relationshipLabel) {
+    if (personEntityId && linkedCompanyEntity && relationshipLabel && !hasPscAutoConnection(personEntityId, linkedCompanyEntity.id)) {
       addConnection(
         personLatLng,
         linkedCompanyEntity.latLng,
@@ -4582,6 +4706,8 @@ function clearAll() {
   if (confirm('Clear all companies from map?')) {
     removeCompanyEntitiesFromStore();
     window._officerEntityIndex = {};
+    window._officerEntityByOfficerId = {};
+    window._officerEntityByNameDob = {};
     layers.companies.clearLayers();
   }
   ["ch_name","ch_number","ch_postcode","ch_town","ch_status","ch_sic"].forEach(id => {
