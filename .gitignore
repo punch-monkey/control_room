@@ -26,6 +26,11 @@ data/bellingcat*/
 data/postcodes.json
 data/companies_house_subset.csv
 data/railways/
+data/DVLA/*.csv
+data/dvla_icon_crossref/*.csv
+data/dvla_icon_crossref/*.json
+!data/dvla_icon_crossref/README.md
+data/raildata_previews/
 data/OS Map/
 data/osm_derived/
 !data/osm_derived/
@@ -79,3 +84,11 @@ deploy/cloudflare-worker/node_modules/
 gfx/gta-v-map-leaflet-main/mapStyles.rar
 gfx/gta-v-map-leaflet-main/
 _geojson/
+
+# Local bulk media/datasets (keep local, do not push)
+gfx/car-logos-dataset-master/
+gfx/vehicle_images/
+gfx/vehicle_icons/
+data/vehicle_images/
+data/vehicle_models.json
+data/vehicle_icons_granturismo.json

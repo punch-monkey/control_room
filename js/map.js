@@ -38,6 +38,8 @@ let CH_TOTAL_ROWS = 0;
 let I2_ENTITY_CATALOG = [];
 const I2_ENTITY_BY_ID = {};
 const I2_ENTITY_BY_NAME = {};
+let I2_CATALOG_LOADED = false;
+let I2_CATALOG_LOADING_PROMISE = null;
 
 const I2_DEFAULT_BY_CATEGORY = {
   people: "Person",
@@ -484,6 +486,12 @@ map.getPane("tflRoutesPane").style.zIndex = 430;
 map.createPane("tflStationsPane");
 map.getPane("tflStationsPane").style.zIndex = 470;
 
+map.createPane("nrRoutesPane");
+map.getPane("nrRoutesPane").style.zIndex = 420;
+
+map.createPane("nrStationsPane");
+map.getPane("nrStationsPane").style.zIndex = 475;
+
 // Scale bar
 L.control.scale({ imperial: false, position: "bottomright" }).addTo(map);
 
@@ -883,7 +891,12 @@ function showEntityPlacementDialog(latLng) {
   
   // Pre-populate icons for the selected category
   updateIconDropdown(category);
+  const typeSelect = document.getElementById("entity-i2-type");
+  if (typeSelect && !I2_CATALOG_LOADED) {
+    typeSelect.innerHTML = '<option value="">Loading i2 entity types...</option>';
+  }
   populateI2EntityTypeSelect(category);
+  ensureI2EntityCatalogLoaded(category);
   
   // Update coordinates display
   const coordPair = normalizeLatLng(latLng);
@@ -1127,7 +1140,10 @@ function chooseIconForI2Entity(entity) {
   return { category, icon: catData.icons[0] };
 }
 
-function startI2EntityPlacement(entityTypeId) {
+async function startI2EntityPlacement(entityTypeId) {
+  if (!I2_CATALOG_LOADED) {
+    await ensureI2EntityCatalogLoaded();
+  }
   const entityDef = getI2EntityByKey(entityTypeId);
   if (!entityDef) return;
 
@@ -1359,6 +1375,7 @@ function populateI2EntityTypeSelect(selectedCategory = "") {
 }
 
 async function initI2EntityCatalog() {
+  if (I2_CATALOG_LOADED) return;
   try {
     const resp = await fetch("data/i2 Specs/parsed/entity_catalog.json");
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1373,7 +1390,27 @@ async function initI2EntityCatalog() {
     console.warn("Could not load i2 entity catalog for placement form:", err);
     I2_ENTITY_CATALOG = [];
   }
+  I2_CATALOG_LOADED = true;
   populateI2EntityTypeSelect();
+}
+
+function ensureI2EntityCatalogLoaded(selectedCategory = "") {
+  if (I2_CATALOG_LOADED) {
+    if (selectedCategory) populateI2EntityTypeSelect(selectedCategory);
+    return Promise.resolve(true);
+  }
+  if (!I2_CATALOG_LOADING_PROMISE) {
+    I2_CATALOG_LOADING_PROMISE = initI2EntityCatalog()
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => {
+        I2_CATALOG_LOADING_PROMISE = null;
+      });
+  }
+  return I2_CATALOG_LOADING_PROMISE.then((ok) => {
+    if (ok && selectedCategory) populateI2EntityTypeSelect(selectedCategory);
+    return ok;
+  });
 }
 
 function collectI2EntityFormData() {
@@ -2237,6 +2274,31 @@ function formatI2EntitySummary(i2EntityData) {
   );
 }
 
+function isVehicleLikeI2Data(i2EntityData = null, iconData = null) {
+  const iconCategory = String(iconData?.categoryName || iconData?.name || "").toLowerCase();
+  if (iconCategory.includes("vehicle")) return true;
+  const values = Array.isArray(i2EntityData?.values) ? i2EntityData.values : [];
+  const propNames = values.map((v) => String(v?.propertyName || "").toLowerCase());
+  return propNames.some((p) =>
+    p === "registration mark" ||
+    p === "vrm" ||
+    p === "vehicle make" ||
+    p === "vehicle model" ||
+    p === "vehicle colour" ||
+    p === "vehicle color"
+  );
+}
+
+function normalizeVehicleI2EntityData(i2EntityData = null, iconData = null) {
+  if (!i2EntityData || typeof i2EntityData !== "object") return i2EntityData;
+  if (!isVehicleLikeI2Data(i2EntityData, iconData)) return i2EntityData;
+  return {
+    ...i2EntityData,
+    entityId: "ET3",
+    entityName: "Vehicle"
+  };
+}
+
 function getI2ValueFromEntityValues(i2EntityData, names = []) {
   if (!i2EntityData || !Array.isArray(i2EntityData.values) || !Array.isArray(names)) return "";
   const lowered = names.map((n) => String(n || "").toLowerCase());
@@ -2309,8 +2371,9 @@ window.formatCountryWithFlag = formatCountryWithFlag;
 
 function buildEntityHoverTooltipHtml(entity) {
   if (!entity) return "";
-  const values = entity.i2EntityData?.values || [];
-  const typeTag = entity.i2EntityData?.entityName || entity.iconData?.categoryName || entity.iconData?.name || "Entity";
+  const normalizedI2 = normalizeVehicleI2EntityData(entity.i2EntityData, entity.iconData);
+  const values = normalizedI2?.values || [];
+  const typeTag = normalizedI2?.entityName || entity.iconData?.categoryName || entity.iconData?.name || "Entity";
 
   let row1 = escapeHtml(entity.label || "Entity");
   let row2 = escapeHtml(typeTag);
@@ -2345,6 +2408,9 @@ function bindEntityHoverTooltip(marker, entity) {
 }
 
 function buildEntityPopup(entityId, entity) {
+  if (entity?.i2EntityData) {
+    entity.i2EntityData = normalizeVehicleI2EntityData(entity.i2EntityData, entity.iconData);
+  }
   if (entity?.sourceType === "officer") {
     const dob =
       getI2ValueFromEntityValues(entity.i2EntityData, ["Date of Birth", "DOB"]) ||
@@ -2755,7 +2821,7 @@ function placeEntity(latLng, iconData, label = '', address = '', notes = '', i2E
     notes: notes || '',
     latLng: coords,
     marker: marker,
-    i2EntityData: i2EntityData || null
+    i2EntityData: normalizeVehicleI2EntityData(i2EntityData, iconData) || null
   };
 
   marker.bindPopup(buildEntityPopup(entityId, entity)).addTo(entitiesMarkerCluster);
@@ -2857,20 +2923,173 @@ function clearAllEntities() {
   updateDashboardCounts();
 }
 
-function getVehicleEntityIconData() {
+const CAR_MAKE_LOGO_INDEX_DEFAULT = {};
+let CAR_MAKE_LOGO_INDEX = { ...CAR_MAKE_LOGO_INDEX_DEFAULT };
+
+function normalizeCarMakeKey(raw) {
+  const text = String(raw || "");
+  const latinized = typeof text.normalize === "function"
+    ? text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    : text;
+  return latinized.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function canonicalizeWikimediaFileUrl(urlRaw) {
+  const url = String(urlRaw || "").trim();
+  if (!url) return "";
+  if (!/^https?:\/\//i.test(url)) return "";
+  return url
+    .replace(/^http:\/\//i, "https://")
+    .replace(/^https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//i, "https://commons.wikimedia.org/wiki/Special:FilePath/");
+}
+
+function buildCarMakeLogoIndexFromVehicleEntities(rawEntities) {
+  if (!rawEntities || typeof rawEntities !== "object") return {};
+  const index = {};
+  Object.entries(rawEntities).forEach(([entityId, entity]) => {
+    if (!entity || typeof entity !== "object") return;
+    const logoUrl = canonicalizeWikimediaFileUrl(entity.logo_url);
+    if (!logoUrl) return;
+
+    const labelKey = normalizeCarMakeKey(entity.label || "");
+    if (labelKey) index[labelKey] = logoUrl;
+
+    const idKey = normalizeCarMakeKey(entityId);
+    if (idKey) index[idKey] = logoUrl;
+  });
+
+  const aliases = {
+    landrover: ["land_rover", "land_rover_limited"],
+    mercedes: ["mercedes_benz", "mercedes_benz_group"],
+    mercedesbenz: ["mercedes_benz", "mercedes_benz_group"],
+    mg: ["mg_motor", "mg_motor_uk", "saic_motor"],
+    rollsroyce: ["rolls_royce_motor_cars", "rolls_royce_limited"],
+    vauxhall: ["vauxhall_motors", "opel"],
+    alfa: ["alfa_romeo"],
+    alfaromeo: ["alfa_romeo"]
+  };
+  Object.entries(aliases).forEach(([target, refs]) => {
+    if (index[target]) return;
+    for (const ref of refs) {
+      const k = normalizeCarMakeKey(ref);
+      if (index[k]) {
+        index[target] = index[k];
+        break;
+      }
+    }
+  });
+  return index;
+}
+
+function setCarMakeLogoIndex(rawIndex) {
+  if (!rawIndex || typeof rawIndex !== "object") {
+    CAR_MAKE_LOGO_INDEX = { ...CAR_MAKE_LOGO_INDEX_DEFAULT };
+    return;
+  }
+  CAR_MAKE_LOGO_INDEX = rawIndex;
+}
+
+let DVLA_VEHICLE_ICON_LOOKUP = null;
+const dvlaVehicleIconLookupPromise = fetch("data/dvla_vehicle_icon_lookup.json")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((payload) => {
+    if (!payload || typeof payload !== "object") return null;
+    if (!payload.by_make || typeof payload.by_make !== "object") return null;
+    DVLA_VEHICLE_ICON_LOOKUP = payload;
+    return payload;
+  })
+  .catch(() => null);
+
+const vehicleEntitiesLogoPromise = fetch("data/vehicle_entities.json")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((entities) => {
+    if (!entities) return null;
+    const built = buildCarMakeLogoIndexFromVehicleEntities(entities);
+    return Object.keys(built).length ? built : null;
+  })
+  .catch(() => null);
+
+function getVehicleMakeLogoPath(makeRaw) {
+  const key = normalizeCarMakeKey(makeRaw);
+  if (!key) return "";
+  return String(CAR_MAKE_LOGO_INDEX[key] || "");
+}
+
+function parseVehicleYear(vehicle = {}) {
+  const y = Number(vehicle?.yearOfManufacture || 0);
+  if (Number.isFinite(y) && y >= 1900 && y <= 2100) return Math.trunc(y);
+  const mfr = String(vehicle?.monthOfFirstRegistration || "");
+  const m = mfr.match(/\b(19|20)\d{2}\b/);
+  return m ? Number(m[0]) : 0;
+}
+
+function getDvlaVehicleIconPath(vehicle = {}) {
+  const lookup = DVLA_VEHICLE_ICON_LOOKUP;
+  if (!lookup || typeof lookup !== "object") return "";
+  const byMake = lookup.by_make || {};
+  const makeKey = normalizeCarMakeKey(vehicle?.make || "");
+  if (!makeKey) return "";
+  const makeNode = byMake[makeKey];
+  if (!makeNode || typeof makeNode !== "object") return "";
+
+  const years = makeNode.years || {};
+  const vehicleYear = parseVehicleYear(vehicle);
+  if (vehicleYear && years[String(vehicleYear)]?.icon) {
+    return String(years[String(vehicleYear)].icon || "");
+  }
+
+  if (vehicleYear) {
+    let bestYear = 0;
+    let bestDist = 999;
+    let bestScore = 0;
+    Object.entries(years).forEach(([yearText, node]) => {
+      const y = Number(yearText);
+      if (!Number.isFinite(y)) return;
+      const dist = Math.abs(y - vehicleYear);
+      const score = Number(node?.score || 0);
+      if (dist > 6) return;
+      if (dist < bestDist || (dist === bestDist && score > bestScore)) {
+        bestDist = dist;
+        bestYear = y;
+        bestScore = score;
+      }
+    });
+    if (bestYear && years[String(bestYear)]?.icon) {
+      return String(years[String(bestYear)].icon || "");
+    }
+  }
+
+  return String(makeNode.default_icon || "");
+}
+
+window.getVehicleMakeLogoPath = getVehicleMakeLogoPath;
+window.getDvlaVehicleIconPath = getDvlaVehicleIconPath;
+vehicleEntitiesLogoPromise.then((fromEntities) => {
+  if (fromEntities && typeof fromEntities === "object" && Object.keys(fromEntities).length) {
+    setCarMakeLogoIndex(fromEntities);
+    return;
+  }
+  setCarMakeLogoIndex(CAR_MAKE_LOGO_INDEX_DEFAULT);
+});
+dvlaVehicleIconLookupPromise.then(() => {
+  // no-op; ensures asynchronous load starts early
+});
+
+function getVehicleEntityIconData(makeRaw = "", vehicle = null) {
   const vehicles = ICON_CATEGORIES.vehicles || {};
   const carIcon = (vehicles.icons || []).find((ic) => ic.id === "car") || (vehicles.icons || [])[0];
+  const mappedVehicleIcon = vehicle ? getDvlaVehicleIconPath(vehicle) : "";
+  const logoPath = getVehicleMakeLogoPath(makeRaw);
   return {
     id: carIcon?.id || "car",
-    name: carIcon?.name || "Vehicle",
-    icon: carIcon?.icon || vehicles.defaultIcon || ICON_CATEGORIES.vehicles?.defaultIcon,
+    name: String(makeRaw || carIcon?.name || "Vehicle"),
+    icon: mappedVehicleIcon || logoPath || carIcon?.icon || vehicles.defaultIcon || ICON_CATEGORIES.vehicles?.defaultIcon,
     categoryColor: vehicles.color || "#f59e0b",
     categoryName: vehicles.name || "Vehicles"
   };
 }
 
 function buildVehicleI2EntityData(vehicle = {}) {
-  const vehicleEntity = getI2EntityByKey("ET8") || getI2EntityByKey("Vehicle");
   const values = [];
   if (vehicle.registrationNumber) values.push({ propertyName: "Registration Mark", value: String(vehicle.registrationNumber) });
   if (vehicle.make) values.push({ propertyName: "Vehicle Make", value: String(vehicle.make) });
@@ -2881,8 +3100,8 @@ function buildVehicleI2EntityData(vehicle = {}) {
   if (vehicle.taxStatus) values.push({ propertyName: "Tax Status", value: String(vehicle.taxStatus) });
   if (vehicle.motStatus) values.push({ propertyName: "MOT Status", value: String(vehicle.motStatus) });
   return {
-    entityId: vehicleEntity?.entity_id || "ET8",
-    entityName: vehicleEntity?.entity_name || "Vehicle",
+    entityId: "ET3",
+    entityName: "Vehicle",
     values
   };
 }
@@ -2901,7 +3120,7 @@ function addDvlaVehicleEntity(vehicle = {}, latLng = null) {
   ].filter(Boolean).join(" | ");
   const entityId = placeEntity(
     center,
-    getVehicleEntityIconData(),
+    getVehicleEntityIconData(vehicle.make, vehicle),
     label || vrm,
     "",
     notes,
@@ -3532,6 +3751,17 @@ function clearImportedEntities() {
 // â”€â”€ Load overlay data â”€â”€
 
 // Police force boundaries
+const OVERLAY_LOAD_STATE = {
+  areasLoaded: false,
+  areasLoading: null,
+  airportsLoaded: false,
+  airportsLoading: null,
+  seaportsLoaded: false,
+  seaportsLoading: null,
+  undergroundLoaded: false,
+  undergroundLoading: null
+};
+
 function resolvePoliceForceName(props = {}) {
   if (!props || typeof props !== "object") return "Unknown Police Force";
   const directKeys = ["PFA22NM", "PFA23NM", "PFA21NM", "PFA20NM", "force_name", "FORCE_NAME", "name", "NAME"];
@@ -3556,93 +3786,311 @@ function resolvePoliceForceCode(props = {}) {
   return "";
 }
 
-fetch("data/police_force_areas_wgs84.geojson").then(r => r.json()).then(data => {
-  L.geoJSON(data, {
-    style: { color: "#818cf8", weight: 2, fillColor: "#818cf8", fillOpacity: 0.06, dashArray: "6 4" },
-    onEachFeature: (f, l) => {
-      const n = resolvePoliceForceName(f.properties || {});
-      const code = resolvePoliceForceCode(f.properties || {});
-      l.bindPopup(
-        `<strong>${escapeHtml(n)}</strong><br>` +
-        `<span class="popup-label">Police Force Area</span>` +
-        (code ? `<br><span class="popup-label">Force Code</span> ${escapeHtml(code)}` : "")
-      );
-    }
-  }).addTo(layers.areas);
-}).catch(e => console.warn("Police areas:", e));
+async function ensurePoliceAreasLoaded() {
+  if (OVERLAY_LOAD_STATE.areasLoaded) return true;
+  if (OVERLAY_LOAD_STATE.areasLoading) return OVERLAY_LOAD_STATE.areasLoading;
+  OVERLAY_LOAD_STATE.areasLoading = fetch("data/police_force_areas_wgs84.geojson")
+    .then((r) => r.json())
+    .then((data) => {
+      L.geoJSON(data, {
+        style: { color: "#818cf8", weight: 2, fillColor: "#818cf8", fillOpacity: 0.06, dashArray: "6 4" },
+        onEachFeature: (f, l) => {
+          const n = resolvePoliceForceName(f.properties || {});
+          const code = resolvePoliceForceCode(f.properties || {});
+          l.bindPopup(
+            `<strong>${escapeHtml(n)}</strong><br>` +
+            `<span class="popup-label">Police Force Area</span>` +
+            (code ? `<br><span class="popup-label">Force Code</span> ${escapeHtml(code)}` : "")
+          );
+        }
+      }).addTo(layers.areas);
+      OVERLAY_LOAD_STATE.areasLoaded = true;
+      return true;
+    })
+    .catch((e) => {
+      console.warn("Police areas:", e);
+      markOsDerivedLayerUnavailable("areas", "Police force area data unavailable.");
+      return false;
+    })
+    .finally(() => {
+      OVERLAY_LOAD_STATE.areasLoading = null;
+    });
+  return OVERLAY_LOAD_STATE.areasLoading;
+}
 
 // Airports
 const UK_COUNTRIES = ["ENGLAND","SCOTLAND","WALES","NORTHERN IRELAND","IRELAND","UK"];
+const AIRPORT_LOGO_MAP_DEFAULT = { iata: {}, icao: {}, name_hints: [] };
+let AIRPORT_LOGO_MAP = { ...AIRPORT_LOGO_MAP_DEFAULT };
+const AIRPORT_LOGO_HINT_CACHE = [];
+const AIRPORT_LOGO_ICON_CACHE = {};
+const airportLogoMapPromise = fetch("data/airport_logo_map.json")
+  .then((r) => (r.ok ? r.json() : null))
+  .catch(() => null);
+
+function setAirportLogoMap(rawMap) {
+  const nextMap = rawMap && typeof rawMap === "object" ? rawMap : AIRPORT_LOGO_MAP_DEFAULT;
+  AIRPORT_LOGO_MAP = {
+    iata: nextMap.iata && typeof nextMap.iata === "object" ? nextMap.iata : {},
+    icao: nextMap.icao && typeof nextMap.icao === "object" ? nextMap.icao : {},
+    name_hints: Array.isArray(nextMap.name_hints) ? nextMap.name_hints : []
+  };
+  AIRPORT_LOGO_HINT_CACHE.length = 0;
+  AIRPORT_LOGO_MAP.name_hints.forEach((hint) => {
+    const pattern = String(hint?.pattern || "").trim();
+    const logo = String(hint?.logo || "").trim();
+    if (!pattern || !logo) return;
+    try {
+      AIRPORT_LOGO_HINT_CACHE.push({ re: new RegExp(pattern), logo });
+    } catch (_) {
+      // invalid pattern, skip
+    }
+  });
+}
+
+function getAirportLogoPathFromProps(props = {}) {
+  const icao = String(props?.icao || "").toUpperCase();
+  const iata = String(props?.iata || "").toUpperCase();
+  const name = String(props?.name || "").toUpperCase();
+
+  if (iata && AIRPORT_LOGO_MAP.iata[iata]) return AIRPORT_LOGO_MAP.iata[iata];
+  if (icao && AIRPORT_LOGO_MAP.icao[icao]) return AIRPORT_LOGO_MAP.icao[icao];
+
+  for (const hint of AIRPORT_LOGO_HINT_CACHE) {
+    if (hint.re.test(name)) return hint.logo;
+  }
+  return "";
+}
+
+function getAirportLogoIcon(logoPath, isUK) {
+  const key = `${logoPath}|${isUK ? "uk" : "global"}`;
+  if (AIRPORT_LOGO_ICON_CACHE[key]) return AIRPORT_LOGO_ICON_CACHE[key];
+  const size = isUK ? 32 : 24;
+  const icon = L.icon({
+    iconUrl: logoPath,
+    iconSize: [size, size],
+    iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
+    popupAnchor: [0, -Math.round(size / 2)],
+    className: "airport-logo-icon"
+  });
+  AIRPORT_LOGO_ICON_CACHE[key] = icon;
+  return icon;
+}
+
 window.AIRPORT_INDEX = {
   all: [],
   uk: [],
   byIcao: {},
   byIata: {}
 };
-fetch("data/airports.geojson").then(r => r.json()).then(data => {
-  L.geoJSON(data, {
-    pointToLayer: (f, ll) => {
-      const isUK = UK_COUNTRIES.includes((f.properties?.country || "").toUpperCase());
-      return L.circleMarker(ll, {
-        radius: isUK ? 5 : 3,
-        color: isUK ? "#38bdf8" : "#0284c7",
-        fillColor: isUK ? "#38bdf8" : "#0284c7",
-        fillOpacity: isUK ? 0.9 : 0.5,
-        weight: isUK ? 2 : 1
-      });
-    },
-    onEachFeature: (f, l) => {
-      const c = (f.properties?.country || "").toUpperCase();
-      const isUK = UK_COUNTRIES.includes(c);
-      const airport = {
-        icao: String(f.properties?.icao || "").toUpperCase(),
-        iata: String(f.properties?.iata || "").toUpperCase(),
-        name: String(f.properties?.name || "Unnamed"),
-        city: String(f.properties?.city || ""),
-        country: c,
-        lat: Number(f.geometry?.coordinates?.[1]),
-        lon: Number(f.geometry?.coordinates?.[0]),
-        isUK
-      };
-      window.AIRPORT_INDEX.all.push(airport);
-      if (isUK) window.AIRPORT_INDEX.uk.push(airport);
-      if (airport.icao) window.AIRPORT_INDEX.byIcao[airport.icao] = airport;
-      if (airport.iata && airport.iata !== "N/A") window.AIRPORT_INDEX.byIata[airport.iata] = airport;
 
-      l._airportMeta = airport;
-      l.bindPopup(
-        `<div class="airport-intel-popup">` +
-        `<strong>${escapeHtml(airport.name)}</strong><br>` +
-        `<span class="popup-label">ICAO</span> ${escapeHtml(airport.icao || "N/A")} | <span class="popup-label">IATA</span> ${escapeHtml(airport.iata || "N/A")}<br>` +
-        `<span class="popup-label">Country</span> ${escapeHtml(c)}<br>` +
-        `<span class="popup-label">Intel</span> Loading nearby flights...` +
+function normalizeAirportSearchText(v) {
+  return String(v || "").toLowerCase().trim();
+}
+
+function airportPopupHtml(airport) {
+  const logoPath = String(airport?.logoPath || "");
+  const logoBlock = logoPath
+    ? (
+        `<div class="airport-logo-popup-wrap">` +
+          `<img class="airport-logo-popup" src="${escapeHtml(logoPath)}" alt="${escapeHtml(airport?.name || "Airport logo")}" loading="lazy">` +
         `</div>`
-      );
-      l.on("popupopen", () => {
-        if (typeof window.buildAirportIntelPopup === "function") {
-          try {
-            const html = window.buildAirportIntelPopup(l._airportMeta);
-            if (html) l.setPopupContent(html);
-          } catch (_) {
-            // keep fallback popup
-          }
-        }
-      });
-      (isUK ? layers.airports_uk : layers.airports_global).addLayer(l);
-    }
+      )
+    : "";
+  return (
+    `<div class="airport-intel-popup">` +
+      logoBlock +
+      `<strong>${escapeHtml(airport?.name || "Airport")}</strong><br>` +
+      `<span class="popup-label">ICAO</span> ${escapeHtml(airport?.icao || "N/A")} | <span class="popup-label">IATA</span> ${escapeHtml(airport?.iata || "N/A")}<br>` +
+      `<span class="popup-label">Country</span> ${escapeHtml(airport?.country || "Unknown")}<br>` +
+      `<span class="popup-label">Intel</span> Loading nearby flights...` +
+    `</div>`
+  );
+}
+
+function scoreAirportMatch(airport, query) {
+  if (!query) return 0;
+  const q = normalizeAirportSearchText(query);
+  const iata = normalizeAirportSearchText(airport?.iata);
+  const icao = normalizeAirportSearchText(airport?.icao);
+  const name = normalizeAirportSearchText(airport?.name);
+  const city = normalizeAirportSearchText(airport?.city);
+  const country = normalizeAirportSearchText(airport?.country);
+
+  if (iata && iata === q) return 100;
+  if (icao && icao === q) return 98;
+  if (name && name === q) return 95;
+  if (city && city === q) return 90;
+
+  let score = 0;
+  if (iata && iata.startsWith(q)) score = Math.max(score, 85);
+  if (icao && icao.startsWith(q)) score = Math.max(score, 82);
+  if (name && name.includes(q)) score = Math.max(score, 78);
+  if (city && city.includes(q)) score = Math.max(score, 72);
+  if (country && country.includes(q)) score = Math.max(score, 60);
+  return score;
+}
+
+function searchAirports(query, limit = 10) {
+  const q = normalizeAirportSearchText(query);
+  if (!q) return [];
+  const pool = Array.isArray(window.AIRPORT_INDEX?.all) ? window.AIRPORT_INDEX.all : [];
+  return pool
+    .map((airport) => ({ airport, score: scoreAirportMatch(airport, q) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, limit))
+    .map((x) => x.airport);
+}
+
+function ensureAirportLayerVisible(airport) {
+  if (!airport) return;
+  const layerId = airport.isUK ? "airports_uk" : "airports_global";
+  const cb = document.querySelector(`.layer-cb[data-layer="${layerId}"]`);
+  if (cb && !cb.checked) cb.checked = true;
+  const layer = layers[layerId];
+  if (layer && !map.hasLayer(layer)) layer.addTo(map);
+}
+
+function focusAirportOnMap(airport) {
+  if (!airport || !Number.isFinite(airport.lat) || !Number.isFinite(airport.lon)) return;
+  ensureAirportLayerVisible(airport);
+  map.flyTo([airport.lat, airport.lon], Math.max(map.getZoom(), 9), { duration: 0.6 });
+  if (airport.markerRef && typeof airport.markerRef.openPopup === "function") {
+    setTimeout(() => {
+      try { airport.markerRef.openPopup(); } catch (_) {}
+    }, 220);
+  }
+}
+
+function renderAirportSearchResults(items) {
+  const wrap = document.getElementById("airport-search-results");
+  if (!wrap) return;
+  if (!Array.isArray(items) || items.length === 0) {
+    wrap.innerHTML = `<div class="nr-empty">No airports matched this query.</div>`;
+    return;
+  }
+  wrap.innerHTML = items.map((airport, idx) => {
+    const label = `${airport.name || "Airport"} (${airport.iata && airport.iata !== "N/A" ? airport.iata : (airport.icao || "N/A")})`;
+    const meta = [airport.city, airport.country].filter(Boolean).join(", ");
+    return (
+      `<button class="airport-result-item" type="button" data-airport-result="${idx}">` +
+        `<span class="airport-result-name">${escapeHtml(label)}</span>` +
+        `<span class="airport-result-meta">${escapeHtml(meta || "No location metadata")}</span>` +
+      `</button>`
+    );
+  }).join("");
+
+  const nodes = wrap.querySelectorAll("[data-airport-result]");
+  nodes.forEach((node) => {
+    node.addEventListener("click", () => {
+      const i = Number(node.getAttribute("data-airport-result"));
+      if (!Number.isFinite(i) || !items[i]) return;
+      focusAirportOnMap(items[i]);
+    });
   });
-}).catch(e => console.warn("Airports:", e));
+}
+
+async function ensureAirportsLoaded() {
+  if (OVERLAY_LOAD_STATE.airportsLoaded) return true;
+  if (OVERLAY_LOAD_STATE.airportsLoading) return OVERLAY_LOAD_STATE.airportsLoading;
+  window.AIRPORT_INDEX.all = [];
+  window.AIRPORT_INDEX.uk = [];
+  window.AIRPORT_INDEX.byIcao = {};
+  window.AIRPORT_INDEX.byIata = {};
+  OVERLAY_LOAD_STATE.airportsLoading = Promise.all([
+    fetch("data/airports.geojson").then((r) => r.json()),
+    airportLogoMapPromise
+  ]).then(([data, logoMap]) => {
+    if (logoMap) setAirportLogoMap(logoMap);
+    L.geoJSON(data, {
+      pointToLayer: (f, ll) => {
+        const isUK = UK_COUNTRIES.includes((f.properties?.country || "").toUpperCase());
+        const logoPath = isUK ? getAirportLogoPathFromProps(f.properties || {}) : "";
+        if (logoPath) {
+          return L.marker(ll, { icon: getAirportLogoIcon(logoPath, isUK) });
+        }
+        return L.circleMarker(ll, {
+          radius: isUK ? 5 : 3,
+          color: isUK ? "#38bdf8" : "#0284c7",
+          fillColor: isUK ? "#38bdf8" : "#0284c7",
+          fillOpacity: isUK ? 0.9 : 0.5,
+          weight: isUK ? 2 : 1
+        });
+      },
+      onEachFeature: (f, l) => {
+        const c = (f.properties?.country || "").toUpperCase();
+        const isUK = UK_COUNTRIES.includes(c);
+        const logoPath = isUK ? getAirportLogoPathFromProps(f.properties || {}) : "";
+        const airport = {
+          icao: String(f.properties?.icao || "").toUpperCase(),
+          iata: String(f.properties?.iata || "").toUpperCase(),
+          name: String(f.properties?.name || "Unnamed"),
+          city: String(f.properties?.city || ""),
+          country: c,
+          lat: Number(f.geometry?.coordinates?.[1]),
+          lon: Number(f.geometry?.coordinates?.[0]),
+          isUK,
+          logoPath: logoPath || "",
+          markerRef: l
+        };
+        window.AIRPORT_INDEX.all.push(airport);
+        if (isUK) window.AIRPORT_INDEX.uk.push(airport);
+        if (airport.icao) window.AIRPORT_INDEX.byIcao[airport.icao] = airport;
+        if (airport.iata && airport.iata !== "N/A") window.AIRPORT_INDEX.byIata[airport.iata] = airport;
+
+        l._airportMeta = airport;
+        l.bindPopup(airportPopupHtml(airport));
+        l.on("popupopen", () => {
+          if (typeof window.buildAirportIntelPopup === "function") {
+            try {
+              const html = window.buildAirportIntelPopup(l._airportMeta);
+              if (html) l.setPopupContent(html);
+            } catch (_) {
+              // keep fallback popup
+            }
+          }
+        });
+        (isUK ? layers.airports_uk : layers.airports_global).addLayer(l);
+      }
+    });
+    OVERLAY_LOAD_STATE.airportsLoaded = true;
+    return true;
+  }).catch((e) => {
+    console.warn("Airports:", e);
+    return false;
+  }).finally(() => {
+    OVERLAY_LOAD_STATE.airportsLoading = null;
+  });
+  return OVERLAY_LOAD_STATE.airportsLoading;
+}
 
 // Seaports
-fetch("data/sea_ports_simple.geojson").then(r => r.json()).then(data => {
-  L.geoJSON(data, {
-    pointToLayer: (_, ll) => L.circleMarker(ll, {
-      radius: 5, color: "#2dd4bf", fillColor: "#2dd4bf", fillOpacity: 0.85, weight: 1.5
-    }),
-    onEachFeature: (f, l) =>
-      l.bindPopup(`<strong>${f.properties?.name || "Seaport"}</strong><br><span class="popup-label">Seaport</span>`)
-  }).addTo(layers.seaports);
-}).catch(e => console.warn("Seaports:", e));
+async function ensureSeaportsLoaded() {
+  if (OVERLAY_LOAD_STATE.seaportsLoaded) return true;
+  if (OVERLAY_LOAD_STATE.seaportsLoading) return OVERLAY_LOAD_STATE.seaportsLoading;
+  OVERLAY_LOAD_STATE.seaportsLoading = fetch("data/sea_ports_simple.geojson")
+    .then((r) => r.json())
+    .then((data) => {
+      L.geoJSON(data, {
+        pointToLayer: (_, ll) => L.circleMarker(ll, {
+          radius: 5, color: "#2dd4bf", fillColor: "#2dd4bf", fillOpacity: 0.85, weight: 1.5
+        }),
+        onEachFeature: (f, l) =>
+          l.bindPopup(`<strong>${f.properties?.name || "Seaport"}</strong><br><span class="popup-label">Seaport</span>`)
+      }).addTo(layers.seaports);
+      OVERLAY_LOAD_STATE.seaportsLoaded = true;
+      return true;
+    })
+    .catch((e) => {
+      console.warn("Seaports:", e);
+      return false;
+    })
+    .finally(() => {
+      OVERLAY_LOAD_STATE.seaportsLoading = null;
+    });
+  return OVERLAY_LOAD_STATE.seaportsLoading;
+}
 
 const OS_DERIVED_STATE = {
   roadsLoaded: false,
@@ -3950,69 +4398,6 @@ function getTfLRoundelIcon(lines) {
 
 // Load station line information first
 let stationLinesData = {};
-fetch("data/underground_map/underground-live-map-master/bin/lines_for_stations.json")
-  .then(r => r.json())
-  .then(data => {
-    stationLinesData = data;
-    return fetch("data/underground_map/underground-live-map-master/bin/stations.json");
-  })
-  .then(r => r.json())
-  .then(data => {
-    const seen = new Set();
-    for (const [fullName, coords] of Object.entries(data)) {
-      const parts = coords.split(",").map(Number);
-      const lon = parts[0], lat = parts[1];
-      if (isNaN(lat) || isNaN(lon)) continue;
-      
-      // De-duplicate by coordinates
-      const key = lat.toFixed(4) + "," + lon.toFixed(4);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      
-      // Clean up station name
-      const stationName = fullName
-        .replace(/ Station$/i, "").replace(/ Rail Station$/i, "")
-        .replace(/ DLR Station$/i, "").replace(/ Tram Stop$/i, "");
-      
-      // Get lines for this station
-      const lines = stationLinesData[stationName] || [];
-      
-      // Determine network type
-      let networkType = lines.length > 0 ? lines.join(', ') : 'Underground';
-      if (fullName.includes("DLR")) networkType = "DLR";
-      else if (fullName.includes("Tram")) networkType = "Tram";
-      
-      // Use line-specific roundel icon
-      const stationMarker = L.marker([lat, lon], {
-        icon: getTfLRoundelIcon(lines),
-        pane: "tflStationsPane"
-      }).addTo(layers.underground);
-
-      stationMarker.bindPopup(
-        `<strong>${stationName}</strong><br>` +
-        `<span class="popup-label">Lines</span> ${networkType}` +
-        '<div class="tfl-arrivals"><div class="tfl-arrivals-loading">Loading arrivals...</div></div>'
-      );
-
-      stationMarker.on("popupopen", async () => {
-        if (typeof window.buildTflStationPopup !== "function") return;
-        try {
-          const popupData = await window.buildTflStationPopup(stationName, networkType);
-          stationMarker.setPopupContent(popupData.loadingHtml);
-          const fullHtml = await popupData.fetchFull();
-          stationMarker.setPopupContent(fullHtml);
-        } catch (_) {
-          stationMarker.setPopupContent(
-            `<strong>${stationName}</strong><br>` +
-            `<span class="popup-label">Lines</span> ${networkType}` +
-            '<div class="tfl-arrivals"><div class="tfl-arrivals-empty">Arrivals unavailable</div></div>'
-          );
-        }
-      });
-    }
-    console.log(`âœ“ TfL stations loaded with line-specific roundel icons`);
-  })
-  .catch(e => console.warn("TfL Stations:", e));
 
 // Map polyline colors from london-lines.json to line metadata
 const TFL_COLOR_TO_META = {
@@ -4120,19 +4505,72 @@ window.focusTflLine = function focusTflLine(lineId) {
   map.fitBounds(group.getBounds(), { padding: [80, 80], maxZoom: 12 });
 };
 
-// Load TfL line route polylines
-fetch("data/underground_map/underground-live-map-master/bin/london-lines.json")
-  .then((response) => {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  })
-  .then((data) => {
-    if (!data.polylines || !Array.isArray(data.polylines)) {
+async function ensureUndergroundLoaded() {
+  if (OVERLAY_LOAD_STATE.undergroundLoaded) return true;
+  if (OVERLAY_LOAD_STATE.undergroundLoading) return OVERLAY_LOAD_STATE.undergroundLoading;
+  OVERLAY_LOAD_STATE.undergroundLoading = Promise.all([
+    fetch("data/underground_map/underground-live-map-master/bin/lines_for_stations.json").then((r) => r.json()),
+    fetch("data/underground_map/underground-live-map-master/bin/stations.json").then((r) => r.json()),
+    fetch("data/underground_map/underground-live-map-master/bin/london-lines.json").then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    })
+  ]).then(([lineInfo, stationData, lineRouteData]) => {
+    stationLinesData = lineInfo || {};
+
+    const seen = new Set();
+    for (const [fullName, coords] of Object.entries(stationData || {})) {
+      const parts = String(coords || "").split(",").map(Number);
+      const lon = parts[0], lat = parts[1];
+      if (isNaN(lat) || isNaN(lon)) continue;
+
+      const key = lat.toFixed(4) + "," + lon.toFixed(4);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const stationName = fullName
+        .replace(/ Station$/i, "").replace(/ Rail Station$/i, "")
+        .replace(/ DLR Station$/i, "").replace(/ Tram Stop$/i, "");
+
+      const lines = stationLinesData[stationName] || [];
+      let networkType = lines.length > 0 ? lines.join(", ") : "Underground";
+      if (fullName.includes("DLR")) networkType = "DLR";
+      else if (fullName.includes("Tram")) networkType = "Tram";
+
+      const stationMarker = L.marker([lat, lon], {
+        icon: getTfLRoundelIcon(lines),
+        pane: "tflStationsPane"
+      }).addTo(layers.underground);
+
+      stationMarker.bindPopup(
+        `<strong>${stationName}</strong><br>` +
+        `<span class="popup-label">Lines</span> ${networkType}` +
+        '<div class="tfl-arrivals"><div class="tfl-arrivals-loading">Loading arrivals...</div></div>'
+      );
+
+      stationMarker.on("popupopen", async () => {
+        if (typeof window.buildTflStationPopup !== "function") return;
+        try {
+          const popupData = await window.buildTflStationPopup(stationName, networkType);
+          stationMarker.setPopupContent(popupData.loadingHtml);
+          const fullHtml = await popupData.fetchFull();
+          stationMarker.setPopupContent(fullHtml);
+        } catch (_) {
+          stationMarker.setPopupContent(
+            `<strong>${stationName}</strong><br>` +
+            `<span class="popup-label">Lines</span> ${networkType}` +
+            '<div class="tfl-arrivals"><div class="tfl-arrivals-empty">Arrivals unavailable</div></div>'
+          );
+        }
+      });
+    }
+
+    if (!lineRouteData.polylines || !Array.isArray(lineRouteData.polylines)) {
       throw new Error("Invalid data structure - no polylines array");
     }
 
     let addedCount = 0;
-    for (const segment of data.polylines) {
+    for (const segment of lineRouteData.polylines) {
       if (!Array.isArray(segment) || segment.length < 3) continue;
 
       const sourceColor = String(segment[0] || "").toLowerCase();
@@ -4169,11 +4607,19 @@ fetch("data/underground_map/underground-live-map-master/bin/london-lines.json")
     }
 
     window.updateTflLineStylesFromStatus(window._lastTflStatuses);
-    console.log(`TfL route lines loaded: ${addedCount} segments`);
-  })
-  .catch((e) => {
-    console.error("TfL route lines failed:", e.message);
+    OVERLAY_LOAD_STATE.undergroundLoaded = true;
+    console.log(`TfL underground loaded: ${addedCount} route segments`);
+    return true;
+  }).catch((e) => {
+    console.warn("TfL underground data unavailable:", e?.message || e);
+    markOsDerivedLayerUnavailable("underground", "Underground dataset unavailable.");
+    return false;
+  }).finally(() => {
+    OVERLAY_LOAD_STATE.undergroundLoading = null;
   });
+  return OVERLAY_LOAD_STATE.undergroundLoading;
+}
+
 // UI
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
@@ -5039,13 +5485,12 @@ async function runPscSearch() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setStatus("Initializing...");
-  // Only load company index for compatibility (not used for search anymore)
-  await loadCompaniesHouseIndex().catch(() => console.log('Legacy company index not loaded'));
+  // Compatibility-only preload (non-blocking): search path is API-driven.
+  loadCompaniesHouseIndex().catch(() => console.log('Legacy company index not loaded'));
 
   setStatus("Ready - Live API search enabled");
-  
-  // Initialize i2 catalog first so entity selector can list every i2 entity type.
-  await initI2EntityCatalog();
+
+  // i2 catalog now loads lazily when i2/entity placement UI is first used.
   initializeEntitySelector();
   
   // Entity placement panel handlers
@@ -5068,10 +5513,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const entityImportPanel = document.querySelector('.entity-import-panel');
   
   // Category change handler
-  entityCategorySelect?.addEventListener('change', (e) => {
+  entityCategorySelect?.addEventListener('change', async (e) => {
     const category = e.target.value;
     ENTITY_ICON_MANUAL_OVERRIDE = false;
     updateIconDropdown(category);
+    await ensureI2EntityCatalogLoaded(category);
     const defaultI2Entity = defaultI2EntityForCategory(category);
     if (defaultI2Entity && entityI2TypeSelect) {
       entityI2TypeSelect.value = defaultI2Entity.entity_id;
@@ -5080,9 +5526,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     autoSelectIconFromI2Fields(true);
   });
 
-  entityI2TypeSelect?.addEventListener('change', (e) => {
+  entityI2TypeSelect?.addEventListener('change', async (e) => {
+    if (!I2_CATALOG_LOADED) {
+      await ensureI2EntityCatalogLoaded(entityCategorySelect?.value || "");
+    }
     renderI2FieldsForType(e.target.value);
     autoSelectIconFromI2Fields(true);
+  });
+  entityI2TypeSelect?.addEventListener('focus', () => {
+    if (!I2_CATALOG_LOADED) {
+      ensureI2EntityCatalogLoaded(entityCategorySelect?.value || "");
+    }
   });
   
   // Label input handler - auto-suggest icon (unless user locked icon)
@@ -5340,6 +5794,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       document.querySelectorAll(".cp-tab-pane").forEach(p => p.classList.remove("active"));
       tab.classList.add("active");
       document.getElementById("tab-" + tab.dataset.tab)?.classList.add("active");
+      const panel = document.getElementById("control-panel");
+      panel?.classList.toggle("control-panel-layers-docked", tab.dataset.tab === "layers");
     });
   });
 
@@ -5367,8 +5823,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   document.querySelectorAll(".layer-cb").forEach(cb => {
     cb.addEventListener("change", async () => {
-      const layer = layers[cb.dataset.layer];
+      const layerId = cb.dataset.layer;
+      const layer = layers[layerId];
       if (!layer) return;
+      if (cb.checked && layerId === "areas") {
+        const ok = await ensurePoliceAreasLoaded();
+        if (!ok) { cb.checked = false; return; }
+      }
+      if (cb.checked && (layerId === "airports_uk" || layerId === "airports_global" || layerId === "flights")) {
+        await ensureAirportsLoaded();
+      }
+      if (cb.checked && layerId === "seaports") {
+        await ensureSeaportsLoaded();
+      }
+      if (cb.checked && layerId === "underground") {
+        const ok = await ensureUndergroundLoaded();
+        if (!ok) { cb.checked = false; return; }
+      }
       if (cb.checked && cb.dataset.layer === "os_roads") {
         if (map.getZoom() < 6) {
           cb.checked = false;
@@ -5391,6 +5862,40 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
   syncLayerToolBlocks();
+
+  const airportSearchInput = document.getElementById("airport-search-q");
+  const airportSearchBtn = document.getElementById("airport-search-btn");
+  const airportSearchClearBtn = document.getElementById("airport-search-clear-btn");
+  const runAirportSearch = async () => {
+    const q = String(airportSearchInput?.value || "").trim();
+    if (!q) {
+      renderAirportSearchResults([]);
+      return;
+    }
+    const ok = await ensureAirportsLoaded();
+    if (!ok) {
+      const wrap = document.getElementById("airport-search-results");
+      if (wrap) wrap.innerHTML = `<div class="nr-empty">Airport dataset unavailable.</div>`;
+      return;
+    }
+    const hits = searchAirports(q, 12);
+    renderAirportSearchResults(hits);
+    if (hits.length === 1) {
+      focusAirportOnMap(hits[0]);
+    }
+  };
+  airportSearchBtn?.addEventListener("click", runAirportSearch);
+  airportSearchInput?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      runAirportSearch();
+    }
+  });
+  airportSearchClearBtn?.addEventListener("click", () => {
+    if (airportSearchInput) airportSearchInput.value = "";
+    const wrap = document.getElementById("airport-search-results");
+    if (wrap) wrap.innerHTML = "";
+  });
 
   // â”€â”€ Live company search DISABLED (now using API on button click) â”€â”€
   // const debouncedSearch = debounce(() => liveSearch(resultsDiv), 300);

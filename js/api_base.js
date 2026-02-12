@@ -5,7 +5,16 @@
 
 (function bootstrapApiBase() {
   const defaultHostedProxy = "https://control-room-proxy.ben-wilson2092.workers.dev";
-  const raw = String(window.CONTROL_ROOM_API_BASE || defaultHostedProxy).trim();
+  const host = String(window.location?.hostname || "").toLowerCase();
+  const isLocal =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1";
+  const localDefault = String(window.location?.origin || "").trim();
+  const raw = String(
+    window.CONTROL_ROOM_API_BASE ||
+    (isLocal ? localDefault : defaultHostedProxy)
+  ).trim();
   const normalized = raw.replace(/\/+$/, "");
   window.__CONTROL_ROOM_API_BASE = normalized;
 })();

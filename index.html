@@ -20,8 +20,8 @@
     <div class="cp-body" id="cp-body">
       <!-- Tabs -->
       <div class="cp-tabs">
-        <button class="cp-tab active" data-tab="search" title="Search companies and people">Companies / People</button>
-        <button class="cp-tab" data-tab="entities" title="Add custom entities to map">Entities / i2</button>
+        <button class="cp-tab active" data-tab="search" title="Search companies and people">Search</button>
+        <button class="cp-tab" data-tab="entities" title="Add custom entities to map">Entities</button>
         <button class="cp-tab" data-tab="layers" title="Toggle map layers and base map">Layers</button>
       </div>
 
@@ -264,6 +264,21 @@
           <span class="layer-name">Global Airports</span>
         </label>
 
+        <details class="panel-disclosure layer-tool-block" open>
+          <summary>Airport Finder</summary>
+          <div class="airport-tools">
+            <label for="airport-search-q">Airport (IATA / ICAO / Name / City)</label>
+            <div class="airport-row">
+              <input id="airport-search-q" type="text" placeholder="e.g. BRS, EGGD, Bristol" />
+              <button id="airport-search-btn" class="btn-secondary btn-sm" type="button">Find</button>
+            </div>
+            <div class="airport-row">
+              <button id="airport-search-clear-btn" class="btn-secondary btn-sm" type="button">Clear</button>
+            </div>
+            <div id="airport-search-results" class="airport-results"></div>
+          </div>
+        </details>
+
         <label class="layer-row">
           <input type="checkbox" class="layer-cb" data-layer="seaports">
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -430,6 +445,18 @@
               <button id="nr-clear-btn" class="btn-secondary btn-sm" type="button">Clear</button>
             </div>
             <div id="nr-results" class="nr-results"></div>
+
+            <div class="nr-row" style="margin-top:10px;">
+              <button id="raildata-disruptions-btn" class="btn-secondary btn-sm" type="button">Disruptions</button>
+              <button id="raildata-performance-btn" class="btn-secondary btn-sm" type="button">Performance</button>
+              <button id="raildata-reference-btn" class="btn-secondary btn-sm" type="button">Reference</button>
+            </div>
+            <div class="nr-row">
+              <button id="raildata-naptan-btn" class="btn-secondary btn-sm" type="button">NaPTAN</button>
+              <button id="raildata-nptg-btn" class="btn-secondary btn-sm" type="button">NPTG</button>
+              <button id="raildata-feeds-btn" class="btn-secondary btn-sm" type="button">My Feeds</button>
+            </div>
+            <div id="raildata-results" class="nr-results"></div>
           </div>
         </details>
 

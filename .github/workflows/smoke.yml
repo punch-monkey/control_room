@@ -1,0 +1,48 @@
+name: Smoke Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax checks
+        run: |
+          python -m py_compile scripts/dev_server.py
+          python -m py_compile scripts/build_dvla_vehicle_icon_lookup.py
+          python -m py_compile scripts/crossref_dvla_vehicle_icons.py
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JS parse checks
+        run: |
+          node -e "const fs=require('fs'); new Function(fs.readFileSync('js/map.js','utf8')); new Function(fs.readFileSync('js/dvla.js','utf8')); new Function(fs.readFileSync('js/national_rail.js','utf8')); console.log('JS parse OK')"
+
+      - name: Validate DVLA icon lookup JSON
+        run: |
+          python - << 'PY'
+          import json, pathlib, sys
+          p = pathlib.Path("data/dvla_vehicle_icon_lookup.json")
+          if not p.exists():
+              print("Missing data/dvla_vehicle_icon_lookup.json")
+              sys.exit(1)
+          obj = json.loads(p.read_text(encoding="utf-8"))
+          if not isinstance(obj, dict) or "by_make" not in obj:
+              print("Invalid dvla_vehicle_icon_lookup.json structure")
+              sys.exit(1)
+          print("Lookup JSON OK, makes:", len(obj.get("by_make", {})))
+          PY
+

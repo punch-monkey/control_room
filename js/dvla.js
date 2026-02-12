@@ -41,11 +41,24 @@ async function fetchDvlaVehicle(vrm) {
 function renderDvlaResult(vehicle) {
   const wrap = document.getElementById("dvla-results");
   if (!wrap) return;
+  const matchedIconPath = typeof window.getDvlaVehicleIconPath === "function"
+    ? String(window.getDvlaVehicleIconPath(vehicle || {}) || "")
+    : "";
+  const logoPath = matchedIconPath || (typeof window.getVehicleMakeLogoPath === "function"
+    ? String(window.getVehicleMakeLogoPath(vehicle.make || "") || "")
+    : "");
+  const logoAlt = matchedIconPath
+    ? `${String(vehicle.make || "Vehicle")} matched icon`
+    : `${String(vehicle.make || "Vehicle")} logo`;
+  const logoHtml = logoPath
+    ? `<div class="dvla-logo-wrap"><img class="dvla-logo" src="${escapeHtml(logoPath)}" alt="${escapeHtml(logoAlt)}" /></div>`
+    : "";
 
   const rows = [
     ["Registration", vehicle.registrationNumber || ""],
     ["Make", vehicle.make || ""],
-    ["Model", vehicle.monthOfFirstRegistration || ""],
+    ["Model", vehicle.model || ""],
+    ["First Registered", vehicle.monthOfFirstRegistration || ""],
     ["Colour", vehicle.colour || ""],
     ["Fuel", vehicle.fuelType || ""],
     ["Year", vehicle.yearOfManufacture || ""],
@@ -62,6 +75,7 @@ function renderDvlaResult(vehicle) {
   wrap.innerHTML =
     `<div class="dvla-card">` +
     `<div class="dvla-title">${escapeHtml(vehicle.registrationNumber || "Vehicle")}</div>` +
+    logoHtml +
     details +
     `<div class="cp-btn-row" style="margin-top:8px;">` +
     `<button id="dvla-add-map-btn" class="btn-secondary btn-sm" type="button">Add Vehicle To Map</button>` +

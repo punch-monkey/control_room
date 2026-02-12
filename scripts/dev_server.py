@@ -1,13 +1,14 @@
 import base64
 import json
 import os
+import re
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from urllib.parse import urlsplit, parse_qs, urlencode, quote_plus
 
 CH_API_BASE = "https://api.company-information.service.gov.uk"
@@ -22,10 +23,34 @@ UK_RAIL_STATIONS_URL = "https://raw.githubusercontent.com/davwheat/uk-railway-st
 WEBTRIS_API_BASE = "https://webtris.highwaysengland.co.uk/api"
 SIGNALBOX_API_BASE = "https://api.signalbox.io/v2.5"
 DVLA_VES_API_BASE = "https://driver-vehicle-licensing.api.gov.uk"
+RAILDATA_API_BASE = "https://opendata.nationalrail.co.uk"
 
 _station_catalog_cache = {
     "loaded": False,
     "items": [],
+}
+
+_raildata_auth_cache = {
+    "token": "",
+}
+
+RAILDATA_KB_FEEDS = {
+    "stations": "/api/staticfeeds/4.0/stations",
+    "tocs": "/api/staticfeeds/4.0/tocs",
+    "incidents": "/api/staticfeeds/5.0/incidents",
+    "service-indicators": "/api/staticfeeds/4.0/serviceIndicators",
+    "ticket-restrictions": "/api/staticfeeds/4.0/ticket-restrictions",
+    "ticket-types": "/api/staticfeeds/4.0/ticket-types",
+    "promotions-public": "/api/staticfeeds/4.0/promotions-publics",
+    "routeing": "/api/staticfeeds/2.0/routeing",
+}
+
+RAILDATA_ALLOWED_HOSTS = {
+    "opendata.nationalrail.co.uk",
+    "hsp-prod.rockshore.net",
+    "api.nationalrail.co.uk",
+    "api1.raildata.org.uk",
+    "api.raildata.org.uk",
 }
 
 
@@ -137,6 +162,135 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_response(self, resp) -> Optional[dict]:
+        try:
+            raw = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    def _is_allowed_raildata_url(self, url: str) -> bool:
+        try:
+            parsed = urlsplit(str(url or "").strip())
+            if parsed.scheme not in {"http", "https"}:
+                return False
+            host = (parsed.hostname or "").lower()
+            return host in RAILDATA_ALLOWED_HOSTS
+        except Exception:
+            return False
+
+    def _render_url_template(self, url_template: str, values: Dict[str, str]):
+        url = str(url_template or "")
+        needed = [part[1] for part in re.findall(r"(\{([A-Za-z0-9_]+)\})", url)]
+        missing = []
+        for key in needed:
+            value = str(values.get(key, "")).strip()
+            if not value:
+                missing.append(key)
+                continue
+            url = url.replace(f"{{{key}}}", quote_plus(value))
+        return url, missing
+
+    def _proxy_raildata_url(self, upstream_url: str, auth_mode: str = "token", apikey_env: str = "RAILDATA_API_KEY"):
+        if not self._is_allowed_raildata_url(upstream_url):
+            self._send_json(
+                {
+                    "error": "Blocked RailData URL host",
+                    "url": upstream_url,
+                    "allowed_hosts": sorted(RAILDATA_ALLOWED_HOSTS),
+                },
+                status=400,
+            )
+            return True
+
+        req = urllib.request.Request(upstream_url)
+        req.add_header("Accept", "application/json, application/xml, text/xml, text/plain, application/octet-stream")
+        req.add_header("User-Agent", "ControlRoom/1.0 (+https://localhost)")
+
+        if auth_mode == "token":
+            token, err = self._get_raildata_auth_token()
+            if err:
+                self._send_json(err, status=500)
+                return True
+            req.add_header("X-Auth-Token", token or "")
+        elif auth_mode == "apikey":
+            api_key = os.environ.get(apikey_env, "").strip()
+            if not api_key:
+                self._send_json({"error": f"{apikey_env} env var not set"}, status=500)
+                return True
+            req.add_header("x-apikey", api_key)
+        elif auth_mode == "basic":
+            username = os.environ.get("RAILDATA_USERNAME", "").strip()
+            password = os.environ.get("RAILDATA_PASSWORD", "").strip()
+            if not username or not password:
+                self._send_json({"error": "RAILDATA_USERNAME and RAILDATA_PASSWORD required for basic auth endpoint"}, status=500)
+                return True
+            req.add_header("Authorization", f"Basic {b64(f'{username}:{password}')}")
+
+        try:
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                body = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", resp.headers.get("Content-Type", "application/octet-stream"))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+                return True
+        except urllib.error.HTTPError as e:
+            body = e.read() if hasattr(e, "read") else b"{}"
+            if e.code == 401 and auth_mode == "token" and not os.environ.get("RAILDATA_AUTH_TOKEN", "").strip():
+                _raildata_auth_cache["token"] = ""
+            self._send_json_error(e.code, body)
+            return True
+        except Exception as e:
+            self._send_json({"error": "RailData upstream failed", "detail": str(e)}, status=502)
+            return True
+
+    def _get_raildata_auth_token(self) -> Tuple[Optional[str], Optional[dict]]:
+        direct = os.environ.get("RAILDATA_AUTH_TOKEN", "").strip()
+        if direct:
+            return direct, None
+
+        cached = _raildata_auth_cache.get("token", "").strip()
+        if cached:
+            return cached, None
+
+        username = os.environ.get("RAILDATA_USERNAME", "").strip()
+        password = os.environ.get("RAILDATA_PASSWORD", "").strip()
+        if not username or not password:
+            return None, {"error": "RAILDATA credentials not set (use RAILDATA_AUTH_TOKEN or RAILDATA_USERNAME/RAILDATA_PASSWORD)"}
+
+        attempts = [
+            ("/api/v1/token", {"username": username, "password": password}),
+            ("/api/v1/authenticate", {"username": username, "password": password}),
+            ("/api/v1/token", {"email": username, "password": password}),
+            ("/api/v1/authenticate", {"email": username, "password": password}),
+        ]
+        for path, payload in attempts:
+            try:
+                req = urllib.request.Request(f"{RAILDATA_API_BASE}{path}", data=json.dumps(payload).encode("utf-8"), method="POST")
+                req.add_header("Accept", "application/json")
+                req.add_header("Content-Type", "application/json")
+                req.add_header("User-Agent", "ControlRoom/1.0 (+https://localhost)")
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    data = self._read_json_response(resp) or {}
+                    token = str(
+                        data.get("token")
+                        or data.get("authToken")
+                        or data.get("authenticationToken")
+                        or data.get("accessToken")
+                        or ""
+                    ).strip()
+                    if token:
+                        _raildata_auth_cache["token"] = token
+                        return token, None
+            except urllib.error.HTTPError:
+                continue
+            except Exception:
+                continue
+        return None, {"error": "Unable to authenticate with Rail Data API"}
+
     def _xml_local_name(self, tag: str) -> str:
         return tag.split("}", 1)[1] if "}" in tag else tag
 
@@ -186,6 +340,113 @@ class Handler(SimpleHTTPRequestHandler):
             "origin": origins,
             "destination": destinations,
         }
+
+    def _normalize_raildata_board(self, raw: dict, board_type: str, crs_fallback: str = "") -> dict:
+        if not isinstance(raw, dict):
+            return {"generatedAt": "", "locationName": "", "crs": crs_fallback, "nrccMessages": [], "services": []}
+
+        services = []
+        for svc in (raw.get("trainServices") or []):
+            if not isinstance(svc, dict):
+                continue
+            origin = [str(x.get("locationName", "")).strip() for x in (svc.get("origin") or []) if isinstance(x, dict) and str(x.get("locationName", "")).strip()]
+            destination = [str(x.get("locationName", "")).strip() for x in (svc.get("destination") or []) if isinstance(x, dict) and str(x.get("locationName", "")).strip()]
+            services.append(
+                {
+                    "serviceID": str(svc.get("serviceID") or svc.get("serviceId") or "").strip(),
+                    "std": str(svc.get("std") or "").strip(),
+                    "etd": str(svc.get("etd") or "").strip(),
+                    "sta": str(svc.get("sta") or "").strip(),
+                    "eta": str(svc.get("eta") or "").strip(),
+                    "platform": str(svc.get("platform") or "").strip(),
+                    "operator": str(svc.get("operator") or "").strip(),
+                    "operatorCode": str(svc.get("operatorCode") or "").strip(),
+                    "length": str(svc.get("length") or "").strip(),
+                    "origin": origin,
+                    "destination": destination,
+                }
+            )
+        return {
+            "generatedAt": str(raw.get("generatedAt") or ""),
+            "locationName": str(raw.get("locationName") or ""),
+            "crs": str(raw.get("crs") or crs_fallback or ""),
+            "nrccMessages": [str(m).strip() for m in (raw.get("nrccMessages") or []) if str(m).strip()],
+            "services": services,
+        }
+
+    def _fetch_raildata_board_fallback(self, crs: str, board_type: str):
+        if board_type == "departures":
+            tpl = os.environ.get("RAILDATA_LIVE_DEPARTURE_URL", "").strip()
+            key_env = "RAILDATA_LIVE_DEPARTURE_API_KEY"
+        else:
+            tpl = os.environ.get("RAILDATA_LIVE_BOARD_URL", "").strip()
+            key_env = "RAILDATA_LIVE_BOARD_API_KEY"
+        if not tpl:
+            return None, {"error": f"{'RAILDATA_LIVE_DEPARTURE_URL' if board_type == 'departures' else 'RAILDATA_LIVE_BOARD_URL'} env var not set"}
+        rendered, missing = self._render_url_template(tpl, {"crs": crs})
+        if missing:
+            return None, {"error": "Missing template values", "missing": missing}
+        api_key = os.environ.get(key_env, "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()
+        if not api_key:
+            return None, {"error": f"{key_env} env var not set"}
+        try:
+            req = urllib.request.Request(rendered)
+            req.add_header("Accept", "application/json")
+            req.add_header("x-apikey", api_key)
+            req.add_header("User-Agent", "ControlRoom/1.0 (+https://localhost)")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+                parsed = json.loads(text)
+                return self._normalize_raildata_board(parsed, board_type, crs), None
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                body = str(e)
+            return None, {"error": f"RailData board HTTP {e.code}", "detail": body}
+        except Exception as e:
+            return None, {"error": "RailData board request failed", "detail": str(e)}
+
+    def _fetch_raildata_service_details_fallback(self, service_id: str):
+        tpl = os.environ.get("RAILDATA_SERVICE_DETAILS_URL", "").strip()
+        if not tpl:
+            return None, {"error": "RAILDATA_SERVICE_DETAILS_URL env var not set"}
+        rendered, missing = self._render_url_template(tpl, {"serviceid": service_id})
+        if missing:
+            return None, {"error": "Missing template values", "missing": missing}
+        api_key = os.environ.get("RAILDATA_SERVICE_DETAILS_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()
+        if not api_key:
+            return None, {"error": "RAILDATA_SERVICE_DETAILS_API_KEY env var not set"}
+        try:
+            req = urllib.request.Request(rendered)
+            req.add_header("Accept", "application/json")
+            req.add_header("x-apikey", api_key)
+            req.add_header("User-Agent", "ControlRoom/1.0 (+https://localhost)")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+                parsed = json.loads(text)
+                service = {
+                    "serviceID": str(parsed.get("serviceID") or parsed.get("serviceId") or service_id),
+                    "operator": str(parsed.get("operator") or ""),
+                    "std": str(parsed.get("std") or ""),
+                    "etd": str(parsed.get("etd") or ""),
+                    "sta": str(parsed.get("sta") or ""),
+                    "eta": str(parsed.get("eta") or ""),
+                    "platform": str(parsed.get("platform") or ""),
+                    "delayReason": str(parsed.get("delayReason") or ""),
+                    "cancelReason": str(parsed.get("cancelReason") or ""),
+                }
+                return service, None
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                body = str(e)
+            return None, {"error": f"RailData service HTTP {e.code}", "detail": body}
+        except Exception as e:
+            return None, {"error": "RailData service request failed", "detail": str(e)}
 
     def _build_ldbws_envelope(self, token: str, method: str, body_xml: str) -> bytes:
         envelope = f"""<?xml version="1.0" encoding="utf-8"?>
@@ -392,8 +653,250 @@ class Handler(SimpleHTTPRequestHandler):
 
         if self.path.startswith("/nre/health"):
             token = os.environ.get("NRE_LDBWS_TOKEN", "").strip()
-            self._send_json({"ok": True, "configured": bool(token), "endpoint": os.environ.get("NRE_LDBWS_URL", NRE_LDBWS_URL)})
+            live_dep_url = os.environ.get("RAILDATA_LIVE_DEPARTURE_URL", "").strip()
+            live_dep_key = os.environ.get("RAILDATA_LIVE_DEPARTURE_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()
+            live_board_url = os.environ.get("RAILDATA_LIVE_BOARD_URL", "").strip()
+            live_board_key = os.environ.get("RAILDATA_LIVE_BOARD_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()
+
+            raildata_departures_ready = bool(live_dep_url and live_dep_key)
+            raildata_arrivals_ready = bool(live_board_url and live_board_key)
+            configured = bool(token or raildata_departures_ready or raildata_arrivals_ready)
+
+            provider = "darwin" if token else ("raildata" if (raildata_departures_ready or raildata_arrivals_ready) else "none")
+            self._send_json(
+                {
+                    "ok": True,
+                    "configured": configured,
+                    "provider": provider,
+                    "endpoint": os.environ.get("NRE_LDBWS_URL", NRE_LDBWS_URL),
+                    "fallback": {
+                        "raildata_departures_ready": raildata_departures_ready,
+                        "raildata_arrivals_ready": raildata_arrivals_ready,
+                    },
+                }
+            )
             return
+
+        if self.path.startswith("/raildata/health"):
+            has_direct_token = bool(os.environ.get("RAILDATA_AUTH_TOKEN", "").strip())
+            has_credentials = bool(os.environ.get("RAILDATA_USERNAME", "").strip() and os.environ.get("RAILDATA_PASSWORD", "").strip())
+            self._send_json(
+                {
+                    "ok": True,
+                    "configured": bool(has_direct_token or has_credentials),
+                    "auth_mode": "token" if has_direct_token else ("username_password" if has_credentials else ("apikey" if os.environ.get("RAILDATA_API_KEY", "").strip() else "none")),
+                    "kb_feeds": sorted(RAILDATA_KB_FEEDS.keys()),
+                    "helpers": [
+                        "/raildata/feeds",
+                        "/raildata/feeds/available",
+                        "/raildata/disruptions",
+                        "/raildata/performance",
+                        "/raildata/performance/reference",
+                        "/raildata/reference",
+                        "/raildata/naptan",
+                        "/raildata/nptg",
+                        "/raildata/proxy?url=<full-feed-url>",
+                    ],
+                    "endpoint": RAILDATA_API_BASE,
+                }
+            )
+            return
+
+        if self.path.startswith("/raildata/feeds/available"):
+            return self._proxy_raildata_url(f"{RAILDATA_API_BASE}/api/feeds/available", auth_mode="token")
+
+        if self.path.startswith("/raildata/feeds"):
+            return self._proxy_raildata_url(f"{RAILDATA_API_BASE}/api/feeds", auth_mode="token")
+
+        if self.path.startswith("/raildata/user"):
+            return self._proxy_raildata_url(f"{RAILDATA_API_BASE}/api/user", auth_mode="token")
+
+        if self.path.startswith("/raildata/kb/"):
+            parsed = urlsplit(self.path)
+            feed = parsed.path.replace("/raildata/kb/", "", 1).strip().lower()
+            env_url_map = {
+                "tocs": os.environ.get("RAILDATA_TOC_URL", "").strip(),
+                "stations": os.environ.get("RAILDATA_KB_STATIONS_URL", "").strip(),
+            }
+            env_key_map = {
+                "tocs": "RAILDATA_TOC_API_KEY",
+                "stations": "RAILDATA_KB_STATIONS_API_KEY",
+            }
+            explicit_url = env_url_map.get(feed, "")
+            query = f"?{parsed.query}" if parsed.query else ""
+            if explicit_url:
+                return self._proxy_raildata_url(f"{explicit_url}{query}", auth_mode="apikey", apikey_env=env_key_map.get(feed, "RAILDATA_API_KEY"))
+
+            upstream_path = RAILDATA_KB_FEEDS.get(feed)
+            if not upstream_path:
+                self._send_json(
+                    {
+                        "error": "Unknown KB feed",
+                        "feed": feed,
+                        "supported_feeds": sorted(RAILDATA_KB_FEEDS.keys()),
+                    },
+                    status=400,
+                )
+                return
+            upstream_url = f"{RAILDATA_API_BASE}{upstream_path}{query}"
+            mode = "apikey" if (os.environ.get("RAILDATA_TOC_API_KEY", "").strip() or os.environ.get("RAILDATA_KB_STATIONS_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(upstream_url, auth_mode=mode)
+
+        if self.path.startswith("/raildata/disruptions"):
+            configured = os.environ.get("RAILDATA_DISRUPTIONS_URL", "").strip()
+            upstream_url = configured or f"{RAILDATA_API_BASE}{RAILDATA_KB_FEEDS['incidents']}"
+            mode = "apikey" if (os.environ.get("RAILDATA_DISRUPTIONS_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(upstream_url, auth_mode=mode, apikey_env="RAILDATA_DISRUPTIONS_API_KEY")
+
+        if self.path.startswith("/raildata/performance/reference"):
+            configured = os.environ.get("RAILDATA_NWR_PERFORMANCE_REFERENCE_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_NWR_PERFORMANCE_REFERENCE_URL not set",
+                        "hint": "Paste the exact subscribed endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_NWR_PERFORMANCE_REFERENCE_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(configured, auth_mode=mode, apikey_env="RAILDATA_NWR_PERFORMANCE_REFERENCE_API_KEY")
+
+        if self.path.startswith("/raildata/performance"):
+            configured = os.environ.get("RAILDATA_NWR_PERFORMANCE_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_NWR_PERFORMANCE_URL not set",
+                        "hint": "Paste the exact subscribed endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            parsed = urlsplit(self.path)
+            params = parse_qs(parsed.query or "")
+            rendered, missing = self._render_url_template(
+                configured,
+                {"stanoxGroup": (params.get("stanoxGroup") or [""])[0]},
+            )
+            if missing:
+                self._send_json({"error": "Missing required query parameter(s)", "missing": missing}, status=400)
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_NWR_PERFORMANCE_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(rendered, auth_mode=mode, apikey_env="RAILDATA_NWR_PERFORMANCE_API_KEY")
+
+        if self.path.startswith("/raildata/reference"):
+            configured = os.environ.get("RAILDATA_REFERENCE_DATA_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_REFERENCE_DATA_URL not set",
+                        "hint": "Paste the exact subscribed endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            parsed = urlsplit(self.path)
+            params = parse_qs(parsed.query or "")
+            rendered, missing = self._render_url_template(
+                configured,
+                {"currentVersion": (params.get("currentVersion") or [""])[0]},
+            )
+            if missing:
+                self._send_json({"error": "Missing required query parameter(s)", "missing": missing}, status=400)
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_REFERENCE_DATA_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(rendered, auth_mode=mode, apikey_env="RAILDATA_REFERENCE_DATA_API_KEY")
+
+        if self.path.startswith("/raildata/naptan"):
+            configured = os.environ.get("RAILDATA_NAPTAN_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_NAPTAN_URL not set",
+                        "hint": "Paste NaPTAN endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_NAPTAN_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(configured, auth_mode=mode, apikey_env="RAILDATA_NAPTAN_API_KEY")
+
+        if self.path.startswith("/raildata/nptg"):
+            configured = os.environ.get("RAILDATA_NPTG_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_NPTG_URL not set",
+                        "hint": "Paste NPTG endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_NPTG_API_KEY", "").strip() or os.environ.get("RAILDATA_NAPTAN_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            apikey_env = "RAILDATA_NPTG_API_KEY"
+            if not os.environ.get(apikey_env, "").strip() and os.environ.get("RAILDATA_NAPTAN_API_KEY", "").strip():
+                apikey_env = "RAILDATA_NAPTAN_API_KEY"
+            return self._proxy_raildata_url(configured, auth_mode=mode, apikey_env=apikey_env)
+
+        if self.path.startswith("/raildata/service-details"):
+            configured = os.environ.get("RAILDATA_SERVICE_DETAILS_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_SERVICE_DETAILS_URL not set",
+                        "hint": "Paste Service Details endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            parsed = urlsplit(self.path)
+            params = parse_qs(parsed.query or "")
+            rendered, missing = self._render_url_template(
+                configured,
+                {"serviceid": (params.get("serviceid") or [""])[0]},
+            )
+            if missing:
+                self._send_json({"error": "Missing required query parameter(s)", "missing": missing}, status=400)
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_SERVICE_DETAILS_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(rendered, auth_mode=mode, apikey_env="RAILDATA_SERVICE_DETAILS_API_KEY")
+
+        if self.path.startswith("/raildata/live-board"):
+            configured = os.environ.get("RAILDATA_LIVE_BOARD_URL", "").strip()
+            if not configured:
+                self._send_json(
+                    {
+                        "error": "RAILDATA_LIVE_BOARD_URL not set",
+                        "hint": "Paste Live Arrival and Departure Boards endpoint URL from Rail Data My Feeds.",
+                    },
+                    status=400,
+                )
+                return
+            parsed = urlsplit(self.path)
+            params = parse_qs(parsed.query or "")
+            rendered, missing = self._render_url_template(
+                configured,
+                {"crs": (params.get("crs") or [""])[0]},
+            )
+            if missing:
+                self._send_json({"error": "Missing required query parameter(s)", "missing": missing}, status=400)
+                return
+            mode = "apikey" if (os.environ.get("RAILDATA_LIVE_BOARD_API_KEY", "").strip() or os.environ.get("RAILDATA_API_KEY", "").strip()) else "token"
+            return self._proxy_raildata_url(rendered, auth_mode=mode, apikey_env="RAILDATA_LIVE_BOARD_API_KEY")
+
+        if self.path.startswith("/raildata/proxy"):
+            parsed = urlsplit(self.path)
+            params = parse_qs(parsed.query or "")
+            url = ((params.get("url") or [""])[0]).strip()
+            auth_mode = ((params.get("auth") or ["token"])[0]).strip().lower()
+            if not url:
+                self._send_json({"error": "url query parameter required"}, status=400)
+                return
+            if auth_mode not in {"token", "basic", "apikey", "none"}:
+                self._send_json({"error": "auth must be token|basic|apikey|none"}, status=400)
+                return
+            return self._proxy_raildata_url(url, auth_mode=auth_mode if auth_mode != "none" else "")
 
         if self.path.startswith("/nre/departures") or self.path.startswith("/nre/arrivals"):
             parsed = urlsplit(self.path)
@@ -407,7 +910,12 @@ class Handler(SimpleHTTPRequestHandler):
             body = f"<ldb:numRows>{rows or '10'}</ldb:numRows><ldb:crs>{crs}</ldb:crs>"
             root, err = self._call_ldbws(method, body)
             if err:
-                self._send_json(err, status=502)
+                board_type = "departures" if method == "GetDepartureBoard" else "arrivals"
+                fallback_board, fb_err = self._fetch_raildata_board_fallback(crs, board_type)
+                if fallback_board:
+                    self._send_json({"ok": True, "type": board_type, "provider": "raildata", "board": fallback_board})
+                    return
+                self._send_json({"error": err.get("error", "NRE failed"), "detail": err.get("detail", ""), "fallback": fb_err or {}}, status=502)
                 return
             board = self._parse_station_board(root)
             self._send_json({"ok": True, "type": "departures" if method == "GetDepartureBoard" else "arrivals", "board": board})
@@ -502,7 +1010,11 @@ class Handler(SimpleHTTPRequestHandler):
             body = f"<ldb:serviceID>{service_id}</ldb:serviceID>"
             root, err = self._call_ldbws("GetServiceDetails", body)
             if err:
-                self._send_json(err, status=502)
+                fallback_service, fb_err = self._fetch_raildata_service_details_fallback(service_id)
+                if fallback_service:
+                    self._send_json({"ok": True, "provider": "raildata", "service": fallback_service})
+                    return
+                self._send_json({"error": err.get("error", "NRE failed"), "detail": err.get("detail", ""), "fallback": fb_err or {}}, status=502)
                 return
             self._send_json({"ok": True, "service": self._parse_service_details(root)})
             return
@@ -693,6 +1205,12 @@ def main():
     print(f"Proxy:  /flight/schedule?callsign=BAW130&icao24=... -> {AVIATIONSTACK_BASE}/flights")
     print(f"Proxy:  /signalbox/trains?... -> {SIGNALBOX_API_BASE}/trains")
     print(f"Proxy:  /dvla/vehicle [POST] -> {DVLA_VES_API_BASE}/vehicle-enquiry/v1/vehicles")
+    print(f"Proxy:  /raildata/feeds -> {RAILDATA_API_BASE}/api/feeds")
+    print(f"Proxy:  /raildata/kb/<feed> -> {RAILDATA_API_BASE}/api/staticfeeds/* (X-Auth-Token)")
+    print("Proxy:  /raildata/disruptions | /raildata/performance?stanoxGroup=... | /raildata/reference?currentVersion=...")
+    print("Proxy:  /raildata/service-details?serviceid=... | /raildata/live-board?crs=...")
+    print("Proxy:  /raildata/naptan | /raildata/nptg")
+    print("Proxy:  /raildata/proxy?url=<full-feed-url>&auth=token|apikey|basic")
     print(f"{'=' * 60}\n")
     server.serve_forever()
 

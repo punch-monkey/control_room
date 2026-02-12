@@ -126,6 +126,28 @@ This routes `/ch`, `/tfl`, `/signalbox`, `/webtris`, `/postcodes`, `/osplaces`, 
 
 Note: `js/api_base.js` includes a default hosted proxy URL fallback, so GitHub Pages works without a local Python server by default.
 
+## Rail Data Subscriptions
+
+If you have Rail Data Marketplace subscriptions, use the local proxy routes:
+
+- `/raildata/health`
+- `/raildata/kb/<feed>`
+
+Supported `feed` values are documented in `docs/RAILDATA_INTEGRATION.md`.
+
+Set credentials in `.env` using either:
+
+- `RAILDATA_AUTH_TOKEN`, or
+- `RAILDATA_USERNAME` + `RAILDATA_PASSWORD`
+
+See `.env.example` for all supported rail/API variables.
+
+To validate end-to-end quickly:
+
+1. Enable **National Rail** layer in the UI.
+2. Open **National Rail Ops**.
+3. Use the **RailData quick-check buttons** (Disruptions, Performance, Reference, NaPTAN, NPTG, My Feeds).
+
 ## Usage
 
 ### Searching Companies

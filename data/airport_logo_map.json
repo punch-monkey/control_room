@@ -1,0 +1,86 @@
+{
+  "iata": {
+    "BHD": "gfx/airport_icons/George_Best_Belfast_City_Airport.png",
+    "BHX": "gfx/airport_icons/BirminghamAirportLogo.png",
+    "BQH": "gfx/airport_icons/BigginHillAirport.png",
+    "BRS": "gfx/airport_icons/Bristol_Airport_logo_vector.png",
+    "CBG": "gfx/airport_icons/CambridgeAirport.png",
+    "CWL": "gfx/airport_icons/CardiffAirportLogo.png",
+    "EDI": "gfx/airport_icons/EdinburghAirport.png",
+    "JER": "gfx/airport_icons/JER_airport_logo.png",
+    "LCY": "gfx/airport_icons/London_City_Airport_logo.png",
+    "LGW": "gfx/airport_icons/LGW_airport_logo.png",
+    "LHR": "gfx/airport_icons/Heathrow_Logo_2013.png",
+    "LTN": "gfx/airport_icons/London_Luton_Airport_logo_2014.png",
+    "MAN": "gfx/airport_icons/Manchester_Airports_Group_logo.png"
+  },
+  "icao": {
+    "EGAC": "gfx/airport_icons/George_Best_Belfast_City_Airport.png",
+    "EGBB": "gfx/airport_icons/BirminghamAirportLogo.png",
+    "EGCC": "gfx/airport_icons/Manchester_Airports_Group_logo.png",
+    "EGFF": "gfx/airport_icons/CardiffAirportLogo.png",
+    "EGGD": "gfx/airport_icons/Bristol_Airport_logo_vector.png",
+    "EGGW": "gfx/airport_icons/London_Luton_Airport_logo_2014.png",
+    "EGJJ": "gfx/airport_icons/JER_airport_logo.png",
+    "EGKB": "gfx/airport_icons/BigginHillAirport.png",
+    "EGKK": "gfx/airport_icons/LGW_airport_logo.png",
+    "EGLC": "gfx/airport_icons/London_City_Airport_logo.png",
+    "EGLL": "gfx/airport_icons/Heathrow_Logo_2013.png",
+    "EGPH": "gfx/airport_icons/EdinburghAirport.png",
+    "EGSC": "gfx/airport_icons/CambridgeAirport.png"
+  },
+  "name_hints": [
+    {
+      "pattern": "\\bBIGGIN\\b.*\\bHILL\\b",
+      "logo": "gfx/airport_icons/BigginHillAirport.png"
+    },
+    {
+      "pattern": "\\bBIRMINGHAM\\b",
+      "logo": "gfx/airport_icons/BirminghamAirportLogo.png"
+    },
+    {
+      "pattern": "\\bBRISTOL\\b",
+      "logo": "gfx/airport_icons/Bristol_Airport_logo_vector.png"
+    },
+    {
+      "pattern": "\\bCAMBRIDGE\\b",
+      "logo": "gfx/airport_icons/CambridgeAirport.png"
+    },
+    {
+      "pattern": "\\bCARDIFF\\b",
+      "logo": "gfx/airport_icons/CardiffAirportLogo.png"
+    },
+    {
+      "pattern": "\\bEDINBURGH\\b",
+      "logo": "gfx/airport_icons/EdinburghAirport.png"
+    },
+    {
+      "pattern": "\\bGATWICK\\b",
+      "logo": "gfx/airport_icons/Gatwick_Airport_logo.png"
+    },
+    {
+      "pattern": "\\bHEATHROW\\b",
+      "logo": "gfx/airport_icons/Heathrow_Logo_2013.png"
+    },
+    {
+      "pattern": "\\bJERSEY\\b",
+      "logo": "gfx/airport_icons/JER_airport_logo.png"
+    },
+    {
+      "pattern": "\\bLONDON\\b.*\\bCITY\\b",
+      "logo": "gfx/airport_icons/London_City_Airport_logo.png"
+    },
+    {
+      "pattern": "\\bLUTON\\b",
+      "logo": "gfx/airport_icons/London_Luton_Airport_logo_2014.png"
+    },
+    {
+      "pattern": "\\bMANCHESTER\\b",
+      "logo": "gfx/airport_icons/Manchester_Airports_Group_logo.png"
+    },
+    {
+      "pattern": "\\bBELFAST\\b.*\\bCITY\\b",
+      "logo": "gfx/airport_icons/George_Best_Belfast_City_Airport.png"
+    }
+  ]
+}

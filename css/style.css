@@ -46,6 +46,12 @@ body {
   display: flex; flex-direction: column;
 }
 
+#control-panel.control-panel-layers-docked {
+  left: auto;
+  right: 12px;
+  width: 360px;
+}
+
 /* ── Header ── */
 .cp-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -2019,6 +2025,58 @@ body {
   padding: 6px 2px;
 }
 
+.airport-tools {
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.airport-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 7px;
+}
+
+.airport-results {
+  max-height: 190px;
+  overflow: auto;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 6px;
+}
+
+.airport-result-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(56,189,248,0.22);
+  border-radius: 7px;
+  margin-bottom: 6px;
+  padding: 7px 8px;
+  background: rgba(2,132,199,0.09);
+  color: #dbeafe;
+  cursor: pointer;
+  display: block;
+}
+
+.airport-result-item:hover {
+  border-color: rgba(34,211,238,0.45);
+  background: rgba(34,211,238,0.13);
+}
+
+.airport-result-name {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.airport-result-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #93c5fd;
+}
+
 .nr-card {
   border: 1px solid rgba(56,189,248,0.22);
   border-radius: 7px;
@@ -2157,6 +2215,21 @@ body {
   letter-spacing: 0.4px;
 }
 
+.dvla-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0 8px;
+}
+
+.dvla-logo {
+  max-width: 110px;
+  max-height: 42px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 4px rgba(2, 10, 18, 0.7));
+}
+
 .dvla-row {
   display: flex;
   justify-content: space-between;
@@ -2231,7 +2304,11 @@ body {
 .nr-service-line {
   stroke-linecap: round;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 5px rgba(56,189,248,0.35));
+  filter: drop-shadow(0 0 7px rgba(56,189,248,0.42));
+}
+
+.nr-station-node {
+  filter: drop-shadow(0 0 6px rgba(56,189,248,0.5));
 }
 
 /* ══════════════════════════════════════════
@@ -2582,6 +2659,33 @@ button.flight-filter-item span {
   padding: 8px;
 }
 
+.airport-logo-icon {
+  filter: contrast(1.15) saturate(1.08) drop-shadow(0 1px 6px rgba(2, 10, 18, 0.9));
+  background: rgba(5, 12, 18, 0.86);
+  border: 1px solid rgba(56,189,248,0.35);
+  border-radius: 7px;
+  padding: 2px;
+}
+
+.airport-logo-popup-wrap {
+  margin-bottom: 7px;
+  display: flex;
+  justify-content: center;
+}
+
+.airport-logo-popup {
+  max-width: 180px;
+  max-height: 56px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: linear-gradient(180deg, rgba(4,10,18,0.88), rgba(1,7,14,0.92));
+  border: 1px solid rgba(56,189,248,0.3);
+  border-radius: 7px;
+  padding: 6px 10px;
+  filter: contrast(1.16) saturate(1.06) drop-shadow(0 1px 5px rgba(2,10,18,0.9));
+}
+
 .flight-intel-popup {
   min-width: 280px;
   background: linear-gradient(180deg, rgba(2,10,18,0.78), rgba(2,10,18,0.94));
@@ -2771,6 +2875,11 @@ button.flight-filter-item span {
     max-height: 54vh;
   }
 
+  #control-panel.control-panel-layers-docked {
+    right: 9px;
+    width: calc(100vw - 18px);
+  }
+
   .entity-panel {
     width: calc(100vw - 18px);
     right: calc(-100vw - 24px);
@@ -2807,6 +2916,11 @@ button.flight-filter-item span {
     top: 5px;
     max-height: 58vh;
     border-radius: 10px;
+  }
+
+  #control-panel.control-panel-layers-docked {
+    right: auto;
+    width: calc(100vw - 10px);
   }
 
   .cp-header {

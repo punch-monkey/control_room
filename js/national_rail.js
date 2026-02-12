@@ -14,6 +14,7 @@ const NR = {
   signalboxServiceCache: new Map(),
   routesLayer: null,
   routeLines: [],
+  lastRouteSignature: "",
   health: { configured: false, endpoint: "" }
 };
 
@@ -264,12 +265,91 @@ async function fetchNrHealth() {
     const health = await fetchNrJson("/nre/health");
     NR.health = {
       configured: !!health?.configured,
-      endpoint: String(health?.endpoint || "")
+      endpoint: String(health?.endpoint || ""),
+      provider: String(health?.provider || "")
+    };
+    if (NR.health.configured) return NR.health;
+  } catch (_) {
+    // continue to RailData health fallback
+  }
+
+  // Fallback: treat RailData as a valid rail provider when configured.
+  try {
+    const rd = await fetchNrJson("/raildata/health");
+    NR.health = {
+      configured: !!rd?.configured,
+      endpoint: String(rd?.endpoint || ""),
+      provider: "raildata"
     };
     return NR.health;
   } catch (_) {
     NR.health = { configured: false, endpoint: "" };
     return NR.health;
+  }
+}
+
+async function fetchRailDataRaw(path) {
+  const resp = await fetch(apiUrl(path), {
+    headers: { Accept: "application/json, application/xml, text/xml, text/plain" }
+  });
+  const ct = String(resp.headers.get("content-type") || "").toLowerCase();
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status} ${text.slice(0, 220)}`);
+  }
+  if (ct.includes("application/json")) {
+    try {
+      return { contentType: ct, payload: JSON.parse(text), raw: text };
+    } catch (_) {
+      return { contentType: ct, payload: null, raw: text };
+    }
+  }
+  return { contentType: ct || "text/plain", payload: null, raw: text };
+}
+
+function renderRailDataResult(title, data) {
+  const wrap = document.getElementById("raildata-results");
+  if (!wrap) return;
+
+  const ct = escapeHtml(String(data?.contentType || "unknown"));
+  const payload = data?.payload;
+  let summary = "";
+  let preview = "";
+
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload)) {
+      summary = `${payload.length} items`;
+      preview = escapeHtml(JSON.stringify(payload.slice(0, 4), null, 2));
+    } else {
+      const keys = Object.keys(payload);
+      summary = `${keys.length} root keys`;
+      preview = escapeHtml(JSON.stringify(payload, null, 2).slice(0, 1800));
+    }
+  } else {
+    const raw = String(data?.raw || "");
+    summary = `${raw.length} chars`;
+    preview = escapeHtml(raw.slice(0, 1800));
+  }
+
+  wrap.innerHTML =
+    `<div class="nr-card">` +
+    `<div class="nr-card-title">${escapeHtml(title)}</div>` +
+    `<div class="nr-card-meta">Content-Type: ${ct} | ${escapeHtml(summary)}</div>` +
+    `<pre style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:8px 0 0 0;">${preview}</pre>` +
+    `</div>`;
+}
+
+async function runRailDataQuickCheck(path, title) {
+  try {
+    const data = await fetchRailDataRaw(path);
+    renderRailDataResult(title, data);
+    setStatus(`RailData loaded: ${title}`);
+  } catch (e) {
+    const wrap = document.getElementById("raildata-results");
+    if (wrap) {
+      wrap.innerHTML = `<div class="nr-alert">RailData failed (${escapeHtml(title)}): ${escapeHtml(String(e?.message || e))}</div>`;
+    }
+    setStatus("RailData fetch failed");
   }
 }
 
@@ -306,6 +386,30 @@ function ensureNrRoutesLayer() {
 function clearNrRoutes() {
   if (NR.routesLayer) NR.routesLayer.clearLayers();
   NR.routeLines = [];
+  NR.lastRouteSignature = "";
+}
+
+function buildNrRouteSignature(boardName, entries = []) {
+  const encoded = entries
+    .map((e) => `${String(e?.name || "").toLowerCase()}:${Number(e?.count || 0)}`)
+    .sort()
+    .join("|");
+  return `${String(boardName || "").toLowerCase()}::${encoded}`;
+}
+
+function addNrStationNode(routesLayer, latLng, label, emphasis = false) {
+  if (!routesLayer || !Array.isArray(latLng) || latLng.length < 2) return null;
+  const marker = L.circleMarker(latLng, {
+    pane: "nrStationsPane",
+    radius: emphasis ? 6 : 4.2,
+    color: emphasis ? "#e0f2fe" : "#bae6fd",
+    fillColor: emphasis ? "#38bdf8" : "#0ea5e9",
+    fillOpacity: emphasis ? 0.95 : 0.88,
+    weight: emphasis ? 2.4 : 1.6,
+    className: "nr-station-node"
+  }).addTo(routesLayer);
+  if (label) marker.bindTooltip(String(label), { sticky: true, direction: "top", opacity: 0.95 });
+  return marker;
 }
 
 async function plotApproxRailSpokes(crs) {
@@ -321,15 +425,29 @@ async function plotApproxRailSpokes(crs) {
     if (!Number.isFinite(baseLat) || !Number.isFinite(baseLon)) return;
 
     const routesLayer = ensureNrRoutesLayer();
-    for (const st of stations) {
-      const lat = Number(st?.lat);
-      const lon = Number(st?.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    addNrStationNode(routesLayer, [baseLat, baseLon], `${base?.name || crs} (${crs})`, true);
+
+    const entries = stations
+      .map((st) => ({
+        name: String(st?.name || "").trim(),
+        lat: Number(st?.lat),
+        lon: Number(st?.lon),
+        distanceKm: st?.distanceKm
+      }))
+      .filter((st) => st.name && Number.isFinite(st.lat) && Number.isFinite(st.lon))
+      .slice(0, 16);
+
+    NR.lastRouteSignature = buildNrRouteSignature(base?.name || crs, entries.map((e) => ({ name: e.name, count: 1 })));
+
+    for (const st of entries) {
+      const lat = st.lat;
+      const lon = st.lon;
+      addNrStationNode(routesLayer, [lat, lon], st.name);
       const line = L.polyline([[baseLat, baseLon], [lat, lon]], {
+        pane: "nrRoutesPane",
         color: "#7dd3fc",
-        weight: 2.2,
-        opacity: 0.62,
-        dashArray: "6 5",
+        weight: 4.1,
+        opacity: 0.9,
         className: "nr-service-line"
       }).addTo(routesLayer);
       line.bindTooltip(
@@ -351,7 +469,6 @@ async function plotNrServiceLines(board, services) {
   if (!board?.locationName || !Array.isArray(services) || !services.length) return;
   if (!map.hasLayer(layers.national_rail)) return;
 
-  clearNrRoutes();
   const origin = await geocodeStationName(board.locationName);
   if (!origin) return;
 
@@ -369,16 +486,31 @@ async function plotNrServiceLines(board, services) {
     }
   }
 
-  const routesLayer = ensureNrRoutesLayer();
   const entries = Array.from(destinationAgg.values()).sort((a, b) => b.count - a.count).slice(0, 10);
-  for (const entry of entries) {
-    const dest = await geocodeStationName(entry.name);
+  if (!entries.length) return;
+  const nextSignature = buildNrRouteSignature(board.locationName, entries);
+  if (nextSignature === NR.lastRouteSignature) return;
+
+  clearNrRoutes();
+  NR.lastRouteSignature = nextSignature;
+
+  const routesLayer = ensureNrRoutesLayer();
+  addNrStationNode(routesLayer, origin, `${board.locationName} (${board.crs || NR.crs})`, true);
+
+  const destinations = await Promise.all(
+    entries.map(async (entry) => ({ entry, dest: await geocodeStationName(entry.name) }))
+  );
+
+  for (const item of destinations) {
+    const entry = item.entry;
+    const dest = item.dest;
     if (!dest) continue;
+    addNrStationNode(routesLayer, dest, entry.name);
     const line = L.polyline([origin, dest], {
+      pane: "nrRoutesPane",
       color: "#38bdf8",
-      weight: 3,
-      opacity: 0.78,
-      dashArray: "8 6",
+      weight: 4.6,
+      opacity: 0.92,
       className: "nr-service-line"
     }).addTo(routesLayer);
     line.bindTooltip(
@@ -476,11 +608,13 @@ async function upsertNrStationMarker(board) {
   if (!latLng) return;
 
   marker = L.circleMarker(latLng, {
-    radius: 7,
-    color: "#38bdf8",
+    pane: "nrStationsPane",
+    radius: 7.5,
+    color: "#e0f2fe",
     fillColor: "#38bdf8",
-    fillOpacity: 0.9,
-    weight: 2
+    fillOpacity: 0.95,
+    weight: 2.4,
+    className: "nr-station-node"
   }).addTo(layers.national_rail);
 
   marker.bindPopup(
@@ -496,6 +630,7 @@ function clearNrState() {
   clearNrRoutes();
   NR.markers.clear();
   NR.crs = "";
+  NR.lastRouteSignature = "";
   const wrap = document.getElementById("nr-results");
   if (wrap) wrap.innerHTML = '<div class="nr-empty">Cleared</div>';
 }
@@ -555,14 +690,29 @@ function initNationalRail() {
   const typeSel = document.getElementById("nr-board-type");
   const wrap = document.getElementById("nr-results");
   const layerCb = document.querySelector('[data-layer="national_rail"]');
+  const rdDisruptionsBtn = document.getElementById("raildata-disruptions-btn");
+  const rdPerformanceBtn = document.getElementById("raildata-performance-btn");
+  const rdReferenceBtn = document.getElementById("raildata-reference-btn");
+  const rdNaptanBtn = document.getElementById("raildata-naptan-btn");
+  const rdNptgBtn = document.getElementById("raildata-nptg-btn");
+  const rdFeedsBtn = document.getElementById("raildata-feeds-btn");
+  const rdWrap = document.getElementById("raildata-results");
 
   if (wrap) wrap.innerHTML = '<div class="nr-empty">Enter a CRS code and fetch a live board</div>';
+  if (rdWrap) rdWrap.innerHTML = '<div class="nr-empty">RailData quick checks ready</div>';
   fetchNrHealth().then((health) => {
     if (!wrap) return;
     if (!health.configured) {
-      wrap.innerHTML = '<div class="nr-empty">Rail provider not fully configured</div><div class="nr-alert">Set `SIGNALBOX_API_KEY` (preferred) or `NRE_LDBWS_TOKEN`. Station search still works.</div>';
+      wrap.innerHTML = '<div class="nr-empty">Rail provider not fully configured</div><div class="nr-alert">Set one provider: `SIGNALBOX_API_KEY`, `NRE_LDBWS_TOKEN`, or RailData live board keys (`RAILDATA_LIVE_DEPARTURE_API_KEY` / `RAILDATA_LIVE_BOARD_API_KEY`). Station search still works.</div>';
     }
   });
+
+  rdDisruptionsBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/disruptions", "NationalRail Disruptions"));
+  rdPerformanceBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/performance?stanoxGroup=EMR", "NWR Realtime Performance"));
+  rdReferenceBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/reference?currentVersion=1.0", "Reference Data"));
+  rdNaptanBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/naptan", "NaPTAN"));
+  rdNptgBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/nptg", "NPTG"));
+  rdFeedsBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/feeds", "RailData My Feeds"));
 
   const runFetch = async () => {
     const crs = parseCrsFromInput(crsInput?.value || "");

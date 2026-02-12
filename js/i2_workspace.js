@@ -8,6 +8,8 @@
     matching: null,
     entities: []
   };
+  let workspaceLoaded = false;
+  let workspaceLoading = null;
 
   function esc(value) {
     const d = document.createElement("div");
@@ -168,9 +170,43 @@
     renderEntityResults("");
   }
 
+  function ensureI2WorkspaceLoaded() {
+    if (workspaceLoaded) return Promise.resolve(true);
+    if (workspaceLoading) return workspaceLoading;
+    workspaceLoading = initI2Workspace()
+      .then(() => {
+        workspaceLoaded = true;
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        workspaceLoading = null;
+      });
+    return workspaceLoading;
+  }
+
+  function initLazyI2Workspace() {
+    const details = byId("entities-i2-workspace");
+    const templateSelect = byId("i2-template-select");
+    const entitySearch = byId("i2-entity-search");
+
+    const triggerLoad = () => {
+      ensureI2WorkspaceLoaded();
+    };
+
+    if (details) {
+      details.addEventListener("toggle", () => {
+        if (details.open) triggerLoad();
+      });
+      if (details.open) triggerLoad();
+    }
+    templateSelect?.addEventListener("focus", triggerLoad, { once: true });
+    entitySearch?.addEventListener("focus", triggerLoad, { once: true });
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initI2Workspace);
+    document.addEventListener("DOMContentLoaded", initLazyI2Workspace);
   } else {
-    initI2Workspace();
+    initLazyI2Workspace();
   }
 })();

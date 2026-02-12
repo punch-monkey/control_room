@@ -750,8 +750,18 @@ function buildAirportIntelPopup(airport) {
         .join("")
     : `<div class="flight-info-text">No nearby airborne traffic in current refresh window.</div>`;
 
+  const logoPath = String(airport.logoPath || "");
+  const logoBlock = logoPath
+    ? (
+        `<div class="airport-logo-popup-wrap">` +
+          `<img class="airport-logo-popup" src="${escapeHtml(logoPath)}" alt="${escapeHtml(airport.name || "Airport logo")}" loading="lazy">` +
+        `</div>`
+      )
+    : "";
+
   return (
     `<div class="airport-intel-popup">` +
+      logoBlock +
       `<strong>${escapeHtml(airport.name || "Airport")}</strong>` +
       `<div class="flight-intel-meta">` +
         `<span class="popup-label">ICAO</span> ${escapeHtml(airport.icao || "N/A")} | ` +
