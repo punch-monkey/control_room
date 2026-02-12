@@ -532,6 +532,8 @@ const layers = {
   underground:     L.featureGroup(),
   national_rail:   L.featureGroup(),
   roads:           L.featureGroup(),
+  os_roads:        L.featureGroup(),
+  os_rail:         L.featureGroup(),
   flights:         L.featureGroup(),
   bikes:           L.featureGroup()
 };
@@ -2457,6 +2459,65 @@ fetch("data/sea_ports_simple.geojson").then(r => r.json()).then(data => {
   }).addTo(layers.seaports);
 }).catch(e => console.warn("Seaports:", e));
 
+const OS_DERIVED_STATE = {
+  roadsLoaded: false,
+  railLoaded: false,
+  roadsFailed: false,
+  railFailed: false
+};
+
+async function loadOsRoadOverlay() {
+  if (OS_DERIVED_STATE.roadsLoaded || OS_DERIVED_STATE.roadsFailed) return;
+  try {
+    const r = await fetch("data/osm_derived/gb_major_roads.geojson");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    L.geoJSON(data, {
+      style: {
+        color: "#fb923c",
+        weight: 1.8,
+        opacity: 0.62
+      },
+      onEachFeature: (f, l) => {
+        const name = f.properties?.name || "Major Road";
+        const type = f.properties?.highway || "";
+        l.bindTooltip(`${escapeHtml(name)}${type ? ` (${escapeHtml(type)})` : ""}`, { sticky: true, opacity: 0.85 });
+      }
+    }).addTo(layers.os_roads);
+    OS_DERIVED_STATE.roadsLoaded = true;
+  } catch (err) {
+    OS_DERIVED_STATE.roadsFailed = true;
+    console.warn("OS major roads overlay unavailable:", err);
+    setStatus("OS major roads overlay not found. Run OSM extraction to enable.");
+  }
+}
+
+async function loadOsRailOverlay() {
+  if (OS_DERIVED_STATE.railLoaded || OS_DERIVED_STATE.railFailed) return;
+  try {
+    const r = await fetch("data/osm_derived/gb_rail_lines.geojson");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    L.geoJSON(data, {
+      style: {
+        color: "#60a5fa",
+        weight: 1.9,
+        opacity: 0.75
+      },
+      onEachFeature: (f, l) => {
+        const name = f.properties?.name || "Rail Line";
+        const kind = f.properties?.railway || "";
+        l.bindTooltip(`${escapeHtml(name)}${kind ? ` (${escapeHtml(kind)})` : ""}`, { sticky: true, opacity: 0.88 });
+      }
+    }).addTo(layers.os_rail);
+    OS_DERIVED_STATE.railLoaded = true;
+  } catch (err) {
+    OS_DERIVED_STATE.railFailed = true;
+    console.warn("OS rail overlay unavailable:", err);
+    setStatus("OS rail overlay not found. Run OSM extraction to enable.");
+  }
+}
+
 // TfL (Transport for London) ALL stations - Underground, DLR, Overground, Tram, Rail
 
 // Map line names to roundel logo files
@@ -3652,9 +3713,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
   document.querySelectorAll(".layer-cb").forEach(cb => {
-    cb.addEventListener("change", () => {
+    cb.addEventListener("change", async () => {
       const layer = layers[cb.dataset.layer];
       if (!layer) return;
+      if (cb.checked && cb.dataset.layer === "os_roads") {
+        await loadOsRoadOverlay();
+      }
+      if (cb.checked && cb.dataset.layer === "os_rail") {
+        await loadOsRailOverlay();
+      }
       if (cb.checked) { layer.addTo(map); }
       else { map.removeLayer(layer); }
       syncLayerToolBlocks();

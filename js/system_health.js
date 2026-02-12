@@ -20,8 +20,9 @@ async function checkHealthEndpoint(name, path, expected = 200) {
 
 function renderSystemHealth(items) {
   const wrap = document.getElementById("system-health-results");
-  if (!wrap) return;
-  wrap.innerHTML = items.map((item) => {
+  const mini = document.getElementById("status-health-mini");
+
+  const html = items.map((item) => {
     const cls = item.ok ? "system-health-ok" : (item.status ? "system-health-warn" : "system-health-bad");
     const label = item.ok ? "OK" : (item.status ? `HTTP ${item.status}` : "DOWN");
     return (
@@ -31,6 +32,18 @@ function renderSystemHealth(items) {
       `</div>`
     );
   }).join("");
+
+  if (wrap) {
+    wrap.innerHTML = html;
+  }
+
+  if (mini) {
+    mini.innerHTML = items.map((item) => {
+      const cls = item.ok ? "system-health-ok" : (item.status ? "system-health-warn" : "system-health-bad");
+      const label = item.ok ? "OK" : (item.status ? `HTTP ${item.status}` : "DOWN");
+      return `<span class="status-health-chip ${cls}">${escapeHtml(item.name)}: ${escapeHtml(label)}</span>`;
+    }).join("");
+  }
 }
 
 async function runSystemHealthChecks() {

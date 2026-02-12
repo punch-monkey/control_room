@@ -39,6 +39,8 @@ const SV = {
 const PLANE_ICON_SPRITE = "gfx/plane_icons/MapIcons.png";
 const PLANE_SPRITE_GRID = { cols: 3, rows: 3 };
 const PLANE_SPRITE_FALLBACK = { col: 1, row: 2 };
+const UK_COUNTRY_KEYS = ["UNITED KINGDOM", "UK", "GREAT BRITAIN", "ENGLAND", "SCOTLAND", "WALES", "NORTHERN IRELAND"];
+const MILITARY_CALLSIGN_PREFIXES = ["RRR", "RCH", "ASY", "NATO", "QID", "MMF", "IAM", "CFC", "HAF", "BAF", "FAF", "USAF", "RAF"];
 
 function pickPlaneSprite(altMetres) {
   if (altMetres == null || altMetres <= 0) return { col: 1, row: 0 };
@@ -48,22 +50,54 @@ function pickPlaneSprite(altMetres) {
   return { col: 2, row: 2 };
 }
 
-function createPlaneSpriteIcon(rotation, altMetres) {
+function createPlaneSpriteIcon(rotation, altMetres, classification = "international") {
   const sprite = pickPlaneSprite(altMetres) || PLANE_SPRITE_FALLBACK;
   const backgroundX = (sprite.col / (PLANE_SPRITE_GRID.cols - 1)) * 100;
   const backgroundY = (sprite.row / (PLANE_SPRITE_GRID.rows - 1)) * 100;
   const backgroundSize = `${PLANE_SPRITE_GRID.cols * 100}% ${PLANE_SPRITE_GRID.rows * 100}%`;
 
   return L.divIcon({
-    className: "flight-marker",
+    className: `flight-marker flight-${classification}`,
     html:
       `<div class="flight-marker-rotate" style="transform:rotate(${rotation}deg)">` +
-      `<div class="flight-marker-icon" style="background-image:url('${PLANE_ICON_SPRITE}');background-position:${backgroundX}% ${backgroundY}%;background-size:${backgroundSize};"></div>` +
+      `<div class="flight-marker-icon flight-${classification}" style="background-image:url('${PLANE_ICON_SPRITE}');background-position:${backgroundX}% ${backgroundY}%;background-size:${backgroundSize};"></div>` +
       `</div>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
     popupAnchor: [0, -14]
   });
+}
+
+function isMilitaryFlightByCallsign(callsign) {
+  const cs = String(callsign || "").trim().toUpperCase();
+  if (!cs) return false;
+  return MILITARY_CALLSIGN_PREFIXES.some((p) => cs.startsWith(p));
+}
+
+function isUkCountry(value) {
+  const v = String(value || "").trim().toUpperCase();
+  if (!v) return false;
+  return UK_COUNTRY_KEYS.some((k) => v.includes(k));
+}
+
+function classifyFlightType(flight) {
+  if (!flight) return { code: "international", label: "International" };
+  if (isMilitaryFlightByCallsign(flight.callsign)) return { code: "military", label: "Military" };
+  const originCountry = String(flight.originAirport?.country || "");
+  const destCountry = String(flight.destinationAirport?.country || "");
+  if (originCountry && destCountry) {
+    if (originCountry.toUpperCase() === destCountry.toUpperCase()) {
+      if (isUkCountry(originCountry) && isUkCountry(destCountry)) {
+        return { code: "domestic", label: "Domestic (UK)" };
+      }
+      return { code: "domestic", label: "Domestic" };
+    }
+    return { code: "international", label: "International" };
+  }
+  if (isUkCountry(originCountry) || isUkCountry(destCountry)) {
+    return { code: "domestic", label: "Domestic / UK-linked" };
+  }
+  return { code: "international", label: "International" };
 }
 
 function formatFeet(metres) {
@@ -290,6 +324,7 @@ function buildPlanePopupHtml(flight, trail, schedule = null, routeCtx = null) {
   const arrPlanned = arrPlannedRaw === "Unknown" ? "Estimated from current track unavailable" : arrPlannedRaw;
   const arrActual = arrActualRaw === "Unknown" ? "Not published" : arrActualRaw;
   const statusText = String(schedule?.flight?.status || "").trim() || getFlightLifecycleLabel(flight, ops.etaShiftMins);
+  const classInfo = flight?.classification || classifyFlightType(flight);
   const etaShift = Number.isFinite(ops.etaShiftMins)
     ? (ops.etaShiftMins > 0 ? `+${ops.etaShiftMins}m` : `${ops.etaShiftMins}m`)
     : "No change baseline yet";
@@ -309,6 +344,7 @@ function buildPlanePopupHtml(flight, trail, schedule = null, routeCtx = null) {
         `<span class="popup-label">Arrival (planned/ETA)</span> ${escapeHtml(arrPlanned)}<br>` +
         `<span class="popup-label">Arrival (actual)</span> ${escapeHtml(arrActual)}<br>` +
         `<span class="popup-label">Operational Status</span> ${escapeHtml(statusText)}<br>` +
+        `<span class="popup-label">Flight Type</span> ${escapeHtml(classInfo.label)}<br>` +
         `<span class="popup-label">ETA Change</span> ${escapeHtml(etaShift)}` +
       `</div>` +
       `<div class="flight-tracklist">` +
@@ -348,6 +384,8 @@ function drawSelectedFlightRoute(flight, routeCtx = null) {
   const from = routeCtx?.originAirport || flight.originAirport;
   const to = routeCtx?.destinationAirport || flight.destinationAirport;
   const hasPlanePoint = Number.isFinite(flight.lat) && Number.isFinite(flight.lon);
+  const classCode = flight?.classification?.code || "international";
+  const routeColor = classCode === "military" ? "#ef4444" : (classCode === "domestic" ? "#22c55e" : "#38bdf8");
   if (!from || !to || !Number.isFinite(from.lat) || !Number.isFinite(from.lon) || !Number.isFinite(to.lat) || !Number.isFinite(to.lon)) {
     return;
   }
@@ -359,7 +397,7 @@ function drawSelectedFlightRoute(flight, routeCtx = null) {
   OPENSKY.selectedRouteLine = L.polyline(
     points,
     {
-      color: "#f59e0b",
+      color: routeColor,
       weight: 3,
       opacity: 0.92,
       dashArray: "10 7",
@@ -519,11 +557,13 @@ function renderFlightFilterResults() {
   wrap.innerHTML = top
     .map((f) => {
       const id = flightPrimaryId(f);
+      const classInfo = f.classification || classifyFlightType(f);
       const route = `${airportCode(f.originAirport)} -> ${airportCode(f.destinationAirport)}`;
       return (
         `<button class="flight-filter-item flight-filter-hit" type="button" data-icao="${escapeHtml(String(f.icao24 || ""))}">` +
           `<strong>${escapeHtml(id)}</strong> ` +
           `<span>${escapeHtml(route)}</span> ` +
+          `<span>${escapeHtml(classInfo.label)}</span> ` +
           `<span>${escapeHtml(formatFeet(f.alt))}</span>` +
         `</button>`
       );
@@ -791,13 +831,14 @@ function renderFlights(data) {
     const inferred = inferAirportsForFlight(flight, trail);
     flight.originAirport = inferred.originAirport;
     flight.destinationAirport = inferred.destinationAirport;
+    flight.classification = classifyFlightType(flight);
     flightsBuilt.push(flight);
 
     if (!flightMatchesFilters(flight, OPENSKY.filters)) continue;
 
-    const icon = createPlaneSpriteIcon(rotation, alt);
+    const icon = createPlaneSpriteIcon(rotation, alt, flight.classification.code);
     const marker = L.marker([lat, lon], { icon });
-    marker.bindTooltip(escapeHtml(callsign || icao || "Unknown"), { direction: "top", opacity: 0.9 });
+    marker.bindTooltip(`${escapeHtml(callsign || icao || "Unknown")} - ${escapeHtml(flight.classification.label)}`, { direction: "top", opacity: 0.9 });
 
     marker.bindPopup(buildPlanePopupHtml(flight, trail));
     marker.on("popupopen", async () => {
@@ -815,7 +856,9 @@ function renderFlights(data) {
     if (trail.length >= 2) {
       const latLngs = trail.map((p) => [p.lat, p.lon]);
       L.polyline(latLngs, {
-        color: "rgba(34,211,238,0.62)",
+        color: flight.classification.code === "military"
+          ? "rgba(239,68,68,0.72)"
+          : (flight.classification.code === "domestic" ? "rgba(34,197,94,0.7)" : "rgba(56,189,248,0.68)"),
         weight: 1.8,
         opacity: 0.85,
         className: "flight-trail"

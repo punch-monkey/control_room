@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -20,13 +20,12 @@
     <div class="cp-body" id="cp-body">
       <!-- Tabs -->
       <div class="cp-tabs">
-        <button class="cp-tab active" data-tab="search" title="Search and plot companies on map">Companies</button>
-        <button class="cp-tab" data-tab="people" title="Search for people and PSC data">People</button>
+        <button class="cp-tab active" data-tab="search" title="Search companies and people">Companies / People</button>
         <button class="cp-tab" data-tab="entities" title="Add custom entities to map">Entities / i2</button>
         <button class="cp-tab" data-tab="layers" title="Toggle map layers and base map">Layers</button>
       </div>
 
-      <!-- â•â•â• Company Search Tab â•â•â• -->
+      <!-- Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â Company Search Tab Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â -->
       <div class="cp-tab-pane active" id="tab-search">
         <div id="data-progress" class="cp-progress done">
           <div class="cp-progress-label">
@@ -94,7 +93,7 @@
 
         <div id="ch_results"></div>
 
-        <!-- â•â•â• QUICK SEARCH (AUTOCOMPLETE) â•â•â• -->
+        <!-- Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â QUICK SEARCH (AUTOCOMPLETE) Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â -->
         <div class="api-search-divider">
           <span>-- OR QUICK SEARCH --</span>
         </div>
@@ -106,41 +105,41 @@
         </div>
 
         <div id="ch_api_selected"></div>
-        <!-- â•â•â• END QUICK SEARCH â•â•â• -->
+        <!-- Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â END QUICK SEARCH Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â -->
+
+        <details class="panel-disclosure" id="people-ops-block">
+          <summary>People / Officer / PSC Search</summary>
+          <div id="psc-progress" class="cp-progress done">
+            <div class="cp-progress-label">
+              <span id="psc-progress-text">Searching...</span>
+              <span id="psc-progress-pct"></span>
+            </div>
+            <div class="cp-progress-track">
+              <div class="cp-progress-fill" id="psc-progress-fill"></div>
+            </div>
+          </div>
+
+          <label for="psc_name">Person / Officer Name</label>
+          <input id="psc_name" type="text" placeholder="e.g. John Smith" title="Search for officers by name (min 3 characters)" />
+
+          <label for="psc_company">Company Number (for PSC)</label>
+          <input id="psc_company" type="text" placeholder="e.g. 08209948" title="View PSC data for a specific company" />
+
+          <div class="cp-btn-row">
+            <button id="psc_search" class="btn-primary" title="Search for PSC or officers via API">Search API</button>
+            <button id="psc_clear" class="btn-secondary">Clear</button>
+          </div>
+
+          <div class="psc-help-text">
+            Enter a person's name to search officer appointments, or a company number to view PSC records with PDF download.
+          </div>
+
+          <div id="psc_results"></div>
+        </details>
 
       </div>
 
-      <!-- â•â•â• People (PSC) Tab â•â•â• -->
-      <div class="cp-tab-pane" id="tab-people">
-        <div id="psc-progress" class="cp-progress done">
-          <div class="cp-progress-label">
-            <span id="psc-progress-text">Searching...</span>
-            <span id="psc-progress-pct"></span>
-          </div>
-          <div class="cp-progress-track">
-            <div class="cp-progress-fill" id="psc-progress-fill"></div>
-          </div>
-        </div>
-
-        <label for="psc_name">Person / Officer Name</label>
-        <input id="psc_name" type="text" placeholder="e.g. John Smith" title="Search for officers by name (min 3 characters)" />
-
-        <label for="psc_company">Company Number (for PSC)</label>
-        <input id="psc_company" type="text" placeholder="e.g. 08209948" title="View PSC data for a specific company" />
-
-        <div class="cp-btn-row">
-          <button id="psc_search" class="btn-primary" title="Search for PSC or officers via API">Search API</button>
-          <button id="psc_clear" class="btn-secondary">Clear</button>
-        </div>
-
-        <div class="psc-help-text">
-          Enter a person's name to search for officer appointments, or a company number to view PSC records with PDF download.
-        </div>
-
-        <div id="psc_results"></div>
-      </div>
-
-      <!-- â•â•â• Entities Tab â•â•â• -->
+      <!-- Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â Entities Tab Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â -->
       <div class="cp-tab-pane" id="tab-entities">
         <div class="entity-help">
           <strong>Entity Placement + i2 Workspace</strong>
@@ -209,7 +208,7 @@
         </details>
       </div>
 
-      <!-- â•â•â• Layers Tab â•â•â• -->
+      <!-- Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â Layers Tab Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â -->
       <div class="cp-tab-pane" id="tab-layers">
 
         <div class="layer-section-title">Base Map</div>
@@ -331,6 +330,20 @@
           <span class="layer-name">Road Traffic (WebTRIS)</span>
         </label>
 
+        <label class="layer-row">
+          <input type="checkbox" class="layer-cb" data-layer="os_roads">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="layer-dot" style="background:#fb923c"></span>
+          <span class="layer-name">OS Major Roads</span>
+        </label>
+
+        <label class="layer-row">
+          <input type="checkbox" class="layer-cb" data-layer="os_rail">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="layer-dot" style="background:#60a5fa"></span>
+          <span class="layer-name">OS Rail Lines</span>
+        </label>
+
         <details class="panel-disclosure layer-tool-block" data-layer-tools="underground">
           <summary>
             TfL Line Status
@@ -413,13 +426,6 @@
           </div>
         </details>
 
-        <details class="panel-disclosure" id="system-health-panel" open>
-          <summary>System Health</summary>
-          <div id="system-health-results" class="system-health-results">
-            <div class="nr-empty">Checking hosted services...</div>
-          </div>
-        </details>
-
       </div>
 
     </div>
@@ -428,6 +434,9 @@
   <!-- Status bar -->
   <div id="status-bar">
     <span id="status-text">Initialising...</span>
+    <div id="status-health-mini" class="status-health-mini">
+      <span class="status-health-chip">Health: checking...</span>
+    </div>
   </div>
 
   <!-- Entity Placement Panel -->
@@ -482,16 +491,6 @@
     </div>
   </div>
 
-  <!-- Flight Info Panel -->
-  <div id="flight-info" class="flight-info-panel" style="display:none;">
-    <div class="flight-info-header">
-      <span>LIVE FLIGHTS</span>
-      <span id="flight-info-time" class="flight-info-time">--:--</span>
-      <button id="flight-refresh-btn" class="flight-refresh-btn" title="Refresh now">&#x21bb;</button>
-    </div>
-    <div id="flight-stats" class="flight-stats"></div>
-  </div>
-
   <div id="map"></div>
   <button id="mobile-panel-toggle" class="mobile-panel-toggle" type="button" title="Toggle control panel">Panel</button>
 
@@ -500,7 +499,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-  <!-- API Keys (gitignored â€” copy api_keys.example.js to api_keys.js) -->
+  <!-- API Keys (gitignored Ã¢â‚¬â€ copy api_keys.example.js to api_keys.js) -->
   <script src="js/api_keys.js"></script>
 
   <!-- Core Config -->
@@ -527,3 +526,5 @@
 
 </body>
 </html>
+
+
