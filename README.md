@@ -122,7 +122,7 @@ To run from GitHub Pages without `python scripts/dev_server.py`, deploy the Clou
    ```
 3. Commit and push frontend changes
 
-This routes `/ch`, `/tfl`, `/signalbox`, `/webtris`, `/postcodes`, `/osplaces`, `/opensky`, and related endpoints through the hosted proxy.
+This routes `/ch`, `/tfl`, `/signalbox`, `/webtris`, `/postcodes`, `/osplaces`, `/api/flightradar/*`, and related endpoints through the hosted proxy.
 
 Note: `js/api_base.js` includes a default hosted proxy URL fallback, so GitHub Pages works without a local Python server by default.
 

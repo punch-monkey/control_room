@@ -6,12 +6,13 @@ const NR = {
   timer: null,
   crs: "",
   boardType: "departures",
-  provider: "darwin",
+  provider: "raildata",
   markers: new Map(), // crs -> marker
   stationGeoCache: new Map(), // stationName -> [lat, lon]
+  stationGeoByCrsCache: new Map(), // CRS -> [lat, lon]
   stationSuggestTimer: null,
   stationLookupByKey: new Map(),
-  signalboxServiceCache: new Map(),
+  serviceDetailCache: new Map(), // serviceId -> detail payload
   routesLayer: null,
   routeLines: [],
   lastRouteSignature: "",
@@ -20,6 +21,33 @@ const NR = {
 
 const UK_RAIL_STATIONS_CATALOG_URL = "https://raw.githubusercontent.com/davwheat/uk-railway-stations/main/stations.json";
 let UK_RAIL_STATIONS_CACHE = null;
+
+function geoDistanceKm(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function extractNrccMessageText(msg) {
+  if (msg == null) return "";
+  if (typeof msg === "string") return msg.trim();
+  if (typeof msg === "object") {
+    const direct = String(msg.message || msg.value || msg.text || msg.reason || msg.content || "").trim();
+    if (direct) return direct;
+    try {
+      const first = Object.values(msg).find((v) => typeof v === "string" && String(v).trim());
+      return first ? String(first).trim() : "";
+    } catch (_) {
+      return "";
+    }
+  }
+  return "";
+}
 
 async function fetchNrJson(path) {
   const r = await fetch(apiUrl(path), { headers: { "Accept": "application/json" } });
@@ -42,100 +70,141 @@ async function fetchNrJson(path) {
   return r.json();
 }
 
-async function fetchSignalboxJson(path) {
-  const cfg = CONTROL_ROOM_CONFIG?.signalbox || {};
-  const normalized = String(path || "").startsWith("/") ? path : `/${path}`;
-
-  // Try proxy first (recommended: Signalbox often blocks browser CORS).
-  try {
-    const proxyResp = await fetch(apiUrl(`/signalbox${normalized}`), { headers: { Accept: "application/json" } });
-    if (proxyResp.ok) return proxyResp.json();
-    if (proxyResp.status !== 404 && proxyResp.status < 500) {
-      const text = await proxyResp.text();
-      throw new Error(`Signalbox proxy HTTP ${proxyResp.status}: ${text.slice(0, 220)}`);
-    }
-  } catch (_) {
-    // fallback to direct
-  }
-
-  const base = String(cfg.baseUrl || "https://api.signalbox.io/v2.5").replace(/\/+$/, "");
-  const key = String(cfg.apiKey || "").trim();
-  if (!key) throw new Error("Signalbox key missing (set SIGNALBOX_API_KEY)");
-
-  const resp = await fetch(`${base}${normalized}`, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${key}`
-    }
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Signalbox HTTP ${resp.status}: ${text.slice(0, 220)}`);
-  }
-  return resp.json();
-}
-
-function pickFirstValue(obj, keys, fallback = "") {
-  for (const key of keys) {
-    const val = obj?.[key];
-    if (val !== undefined && val !== null && String(val).trim() !== "") return val;
-  }
-  return fallback;
-}
-
-function normalizeSignalboxBoard(raw, crs, type) {
-  const rows = Array.isArray(raw?.trains)
-    ? raw.trains
-    : Array.isArray(raw?.data)
-      ? raw.data
-      : Array.isArray(raw?.results)
-        ? raw.results
-        : Array.isArray(raw)
-          ? raw
-          : [];
-
-  const services = rows.slice(0, 60).map((t) => {
-    const serviceID = String(pickFirstValue(t, ["id", "train_id", "service_id", "uid", "headcode"], ""));
-    const std = String(pickFirstValue(t, ["std", "scheduled_departure", "planned_departure", "departure_scheduled"], ""));
-    const etd = String(pickFirstValue(t, ["etd", "estimated_departure", "departure_estimated", "expected_departure"], ""));
-    const sta = String(pickFirstValue(t, ["sta", "scheduled_arrival", "planned_arrival", "arrival_scheduled"], ""));
-    const eta = String(pickFirstValue(t, ["eta", "estimated_arrival", "arrival_estimated", "expected_arrival"], ""));
-    const platform = String(pickFirstValue(t, ["platform", "plat"], ""));
-    const operator = String(pickFirstValue(t, ["operator", "toc_name", "train_operator"], ""));
-
-    const originName = pickFirstValue(t, ["origin_name", "origin", "from", "from_name"], "");
-    const destinationName = pickFirstValue(t, ["destination_name", "destination", "to", "to_name"], "");
-
-    NR.signalboxServiceCache.set(serviceID, {
-      operator,
-      std, etd, sta, eta, platform,
-      serviceType: "rail",
-      locationName: String(pickFirstValue(t, ["location_name", "station_name"], crs))
-    });
-
+function normalizeRailDataBoard(raw, boardType, crsFallback = "") {
+  if (!raw || typeof raw !== "object") {
     return {
-      serviceID,
-      std, etd, sta, eta,
-      platform,
-      operator,
-      operatorCode: String(pickFirstValue(t, ["operator_code", "toc"], "")),
-      length: "",
-      origin: originName ? [String(originName)] : [],
-      destination: destinationName ? [String(destinationName)] : []
+      generatedAt: "",
+      locationName: "",
+      crs: String(crsFallback || ""),
+      nrccMessages: [],
+      services: []
     };
+  }
+  const servicesIn = Array.isArray(raw.trainServices) ? raw.trainServices : [];
+  const services = servicesIn
+    .filter((svc) => svc && typeof svc === "object")
+    .map((svc) => {
+      const origin = Array.isArray(svc.origin)
+        ? svc.origin
+          .map((x) => String(x?.locationName || "").trim())
+          .filter(Boolean)
+        : [];
+      const destination = Array.isArray(svc.destination)
+        ? svc.destination
+          .map((x) => String(x?.locationName || "").trim())
+          .filter(Boolean)
+        : [];
+      return {
+        serviceID: String(svc.serviceID || svc.serviceId || ""),
+        std: String(svc.std || ""),
+        etd: String(svc.etd || ""),
+        sta: String(svc.sta || ""),
+        eta: String(svc.eta || ""),
+        platform: String(svc.platform || ""),
+        operator: String(svc.operator || ""),
+        operatorCode: String(svc.operatorCode || ""),
+        length: String(svc.length || ""),
+        origin,
+        destination
+      };
+    });
+  return {
+    generatedAt: String(raw.generatedAt || ""),
+    locationName: String(raw.locationName || ""),
+    crs: String(raw.crs || crsFallback || ""),
+    nrccMessages: Array.isArray(raw.nrccMessages)
+      ? raw.nrccMessages.map(extractNrccMessageText).filter(Boolean)
+      : [],
+    services
+  };
+}
+
+function normalizeCallingStop(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const crs = String(raw.crs || raw.CRS || "").trim().toUpperCase();
+  const name = String(raw.locationName || raw.stationName || raw.name || "").trim();
+  if (!crs && !name) return null;
+  return { crs, name };
+}
+
+function pushUniqueStop(out, seen, stop) {
+  const s = normalizeCallingStop(stop);
+  if (!s) return;
+  const key = s.crs || s.name.toLowerCase();
+  if (!key || seen.has(key)) return;
+  seen.add(key);
+  out.push(s);
+}
+
+function collectCallingStops(raw, out, seen) {
+  if (!raw) return;
+  if (Array.isArray(raw)) {
+    raw.forEach((item) => collectCallingStops(item, out, seen));
+    return;
+  }
+  if (typeof raw !== "object") return;
+  pushUniqueStop(out, seen, raw);
+  ["callingPoint", "callingPoints", "previousCallingPoints", "subsequentCallingPoints"].forEach((k) => {
+    if (raw[k] != null) collectCallingStops(raw[k], out, seen);
   });
+}
+
+function normalizeRailDataServiceDetails(raw, serviceIdFallback = "") {
+  const safe = (raw && typeof raw === "object") ? raw : {};
+  const stops = [];
+  const seen = new Set();
+
+  const previous = [];
+  const next = [];
+  collectCallingStops(safe.previousCallingPoints, previous, new Set());
+  collectCallingStops(safe.subsequentCallingPoints, next, new Set());
+  previous.forEach((s) => pushUniqueStop(stops, seen, s));
+  pushUniqueStop(stops, seen, { crs: safe.crs, name: safe.locationName });
+  next.forEach((s) => pushUniqueStop(stops, seen, s));
+
+  if (!stops.length) {
+    collectCallingStops(safe.origin, stops, seen);
+    pushUniqueStop(stops, seen, { crs: safe.crs, name: safe.locationName });
+    collectCallingStops(safe.destination, stops, seen);
+  }
 
   return {
+    serviceID: String(safe.serviceID || safe.serviceId || serviceIdFallback || ""),
+    operator: String(safe.operator || ""),
+    std: String(safe.std || ""),
+    etd: String(safe.etd || ""),
+    sta: String(safe.sta || ""),
+    eta: String(safe.eta || ""),
+    platform: String(safe.platform || ""),
+    delayReason: String(safe.delayReason || ""),
+    cancelReason: String(safe.cancelReason || ""),
+    locationName: String(safe.locationName || ""),
+    crs: String(safe.crs || "").toUpperCase(),
+    callingPoints: stops
+  };
+}
+
+async function fetchRailDataBoardFallback(crs, type, rows) {
+  const q = new URLSearchParams({
+    crs: String(crs || "").toUpperCase(),
+    rows: String(rows || 12)
+  });
+  const raw = await fetchNrJson(`/raildata/live-board?${q.toString()}`);
+  return {
     ok: true,
-    provider: "signalbox",
+    provider: "raildata",
     type,
-    board: {
-      generatedAt: new Date().toISOString(),
-      locationName: String(raw?.locationName || crs),
-      crs: String(crs || ""),
-      nrccMessages: [],
-      services
-    }
+    board: normalizeRailDataBoard(raw, type, crs)
+  };
+}
+
+async function fetchRailDataServiceDetailsFallback(serviceId) {
+  const q = new URLSearchParams({ serviceid: String(serviceId || "") });
+  const payload = await fetchNrJson(`/raildata/service-details?${q.toString()}`);
+  return {
+    ok: true,
+    provider: "raildata",
+    service: normalizeRailDataServiceDetails(payload, serviceId)
   };
 }
 
@@ -150,39 +219,12 @@ async function fetchStationsCatalogDirect() {
 
 async function fetchBoard(crs, type) {
   const rows = CONTROL_ROOM_CONFIG?.nationalRail?.defaultRows || 12;
-  const signalboxCfg = CONTROL_ROOM_CONFIG?.signalbox || {};
-  let signalboxErr = null;
-
-  if (signalboxCfg.enabled) {
-    try {
-      const q = new URLSearchParams({
-        crs: String(crs || "").toUpperCase(),
-        board: type,
-        type,
-        rows: String(rows)
-      });
-      const path = `${signalboxCfg.boardPath || "/trains"}?${q.toString()}`;
-      const payload = await fetchSignalboxJson(path);
-      NR.provider = "signalbox";
-      return normalizeSignalboxBoard(payload, crs, type);
-    } catch (err) {
-      signalboxErr = err;
-      console.warn("Signalbox board failed, falling back to Darwin:", err);
-    }
-  }
-
-  const endpoint = type === "arrivals" ? "/nre/arrivals" : "/nre/departures";
-  const q = new URLSearchParams({ crs, rows: String(rows) });
-  NR.provider = "darwin";
   try {
-    return await fetchNrJson(`${endpoint}?${q.toString()}`);
-  } catch (darwinErr) {
-    if (signalboxErr) {
-      throw new Error(
-        `Signalbox unavailable (${String(signalboxErr?.message || signalboxErr)}); Darwin proxy unavailable (${String(darwinErr?.message || darwinErr)}).`
-      );
-    }
-    throw darwinErr;
+    const rd = await fetchRailDataBoardFallback(crs, type, rows);
+    NR.provider = "raildata";
+    return rd;
+  } catch (raildataErr) {
+    throw new Error(`RailData live board unavailable (${String(raildataErr?.message || raildataErr)}).`);
   }
 }
 
@@ -231,42 +273,29 @@ function hydrateCrsDatalist(stations) {
 }
 
 async function fetchServiceDetails(serviceId) {
-  if (NR.provider === "signalbox") {
-    const cached = NR.signalboxServiceCache.get(String(serviceId || ""));
-    return { ok: true, service: cached || {} };
+  const key = String(serviceId || "").trim();
+  if (!key) return { ok: false, service: {} };
+  if (NR.serviceDetailCache.has(key)) return NR.serviceDetailCache.get(key);
+  try {
+    const detail = await fetchRailDataServiceDetailsFallback(key);
+    NR.serviceDetailCache.set(key, detail);
+    return detail;
+  } catch (_) {
+    const q = new URLSearchParams({ service_id: key });
+    const detail = await fetchNrJson(`/nre/service?${q.toString()}`);
+    NR.serviceDetailCache.set(key, detail);
+    return detail;
   }
-  const q = new URLSearchParams({ service_id: serviceId });
-  return fetchNrJson(`/nre/service?${q.toString()}`);
 }
 
 async function fetchNrHealth() {
-  const signalboxCfg = CONTROL_ROOM_CONFIG?.signalbox || {};
-  if (signalboxCfg.enabled) {
-    try {
-      const health = await fetchSignalboxJson("/health");
-      if (health?.configured || signalboxCfg.apiKey) {
-        NR.health = {
-          configured: true,
-          endpoint: String(health?.endpoint || signalboxCfg.baseUrl || "")
-        };
-        return NR.health;
-      }
-    } catch (_) {
-      if (signalboxCfg.apiKey) {
-        NR.health = {
-          configured: true,
-          endpoint: String(signalboxCfg.baseUrl || "")
-        };
-        return NR.health;
-      }
-    }
-  }
   try {
     const health = await fetchNrJson("/nre/health");
     NR.health = {
       configured: !!health?.configured,
       endpoint: String(health?.endpoint || ""),
-      provider: String(health?.provider || "")
+      provider: String(health?.provider || ""),
+      fallback: health?.fallback || null
     };
     if (NR.health.configured) return NR.health;
   } catch (_) {
@@ -313,41 +342,166 @@ function renderRailDataResult(title, data) {
 
   const ct = escapeHtml(String(data?.contentType || "unknown"));
   const payload = data?.payload;
-  let summary = "";
-  let preview = "";
-
-  if (payload && typeof payload === "object") {
-    if (Array.isArray(payload)) {
-      summary = `${payload.length} items`;
-      preview = escapeHtml(JSON.stringify(payload.slice(0, 4), null, 2));
-    } else {
-      const keys = Object.keys(payload);
-      summary = `${keys.length} root keys`;
-      preview = escapeHtml(JSON.stringify(payload, null, 2).slice(0, 1800));
+  const FEEDS = {
+    disruptions: {
+      label: "NationalRail Disruptions",
+      help: "Rail incident and disruption notices affecting services."
+    },
+    performance: {
+      label: "NWR Realtime Performance",
+      help: "Operational performance reference for selected rail operator groups."
+    },
+    reference: {
+      label: "Reference Data",
+      help: "Static railway reference entities such as stations, operators, and related metadata."
+    },
+    naptan: {
+      label: "NaPTAN",
+      help: "National Public Transport Access Nodes. It identifies stops, stations, and access points."
+    },
+    nptg: {
+      label: "NPTG",
+      help: "National Public Transport Gazetteer. It defines place/locality hierarchy used in transport datasets."
+    },
+    feeds: {
+      label: "RailData My Feeds",
+      help: "Your configured/available RailData feeds and access scope."
     }
+  };
+
+  const feed = FEEDS[String(title || "").toLowerCase()] || { label: title, help: "RailData feed output." };
+  const formatValue = (v) => {
+    if (v == null) return "";
+    if (typeof v === "string") {
+      const s = v.trim();
+      return s === "[object Object]" ? "" : s;
+    }
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    if (Array.isArray(v)) {
+      if (!v.length) return "0 items";
+      const first = v[0];
+      if (typeof first === "string" || typeof first === "number") return `${v.slice(0, 3).join(", ")}${v.length > 3 ? ", ..." : ""}`;
+      return `${v.length} items`;
+    }
+    if (typeof v === "object") {
+      const direct = String(v.name || v.description || v.title || v.code || v.id || "").trim();
+      if (direct && direct !== "[object Object]") return direct;
+      const parts = [];
+      for (const [k, val] of Object.entries(v)) {
+        const str = formatValue(val);
+        if (!str) continue;
+        parts.push(`${k}: ${str}`);
+        if (parts.length >= 3) break;
+      }
+      if (parts.length) return parts.join(" | ");
+      try {
+        const compact = JSON.stringify(v);
+        return compact && compact !== "{}" ? compact.slice(0, 100) : "";
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(v || "");
+  };
+  const toText = (v) => {
+    const out = formatValue(v);
+    return out || "";
+  };
+  const findArray = (obj, keys = []) => {
+    if (!obj || typeof obj !== "object") return [];
+    for (const k of keys) {
+      if (Array.isArray(obj[k])) return obj[k];
+    }
+    for (const [k, v] of Object.entries(obj)) {
+      if (Array.isArray(v) && v.length && typeof v[0] === "object") return v;
+      if (k.toLowerCase().includes("list") && Array.isArray(v)) return v;
+    }
+    return [];
+  };
+  const pickColumns = (rows) => {
+    const preferred = ["tocCode", "desc", "code", "name", "description", "id", "status"];
+    const seen = new Set();
+    const cols = [];
+    preferred.forEach((p) => {
+      if (rows.some((r) => r && Object.prototype.hasOwnProperty.call(r, p))) {
+        cols.push(p);
+        seen.add(p);
+      }
+    });
+    for (const r of rows) {
+      if (!r || typeof r !== "object") continue;
+      for (const k of Object.keys(r)) {
+        if (seen.has(k)) continue;
+        cols.push(k);
+        seen.add(k);
+        if (cols.length >= 4) return cols;
+      }
+    }
+    return cols.slice(0, 4);
+  };
+
+  let summary = "";
+  let bodyHtml = "";
+  if (payload && typeof payload === "object") {
+    const rootKeys = Object.keys(payload);
+    let rows = [];
+    const key = String(title || "").toLowerCase();
+    if (key === "performance") rows = findArray(payload, ["operatorList", "operators"]);
+    else if (key === "disruptions") rows = findArray(payload, ["incidents", "disruptions", "messages"]);
+    else if (key === "reference") rows = findArray(payload, ["stations", "tocs", "routes", "records"]);
+    else if (key === "naptan") rows = findArray(payload, ["stops", "stopPoints", "naptanStops", "records"]);
+    else if (key === "nptg") rows = findArray(payload, ["localities", "places", "records", "areas"]);
+    else if (key === "feeds") rows = findArray(payload, ["feeds", "items", "data"]);
+    else rows = findArray(payload, []);
+
+    if (Array.isArray(payload)) rows = payload;
+    summary = rows.length ? `${rows.length} record${rows.length === 1 ? "" : "s"}` : `${rootKeys.length} fields`;
+
+    const groupName = toText(payload?.group?.groupName || payload?.group?.name || "");
+    const groupDesc = toText(payload?.group?.description || "");
+    const groupLine = groupName ? `${groupName}${groupDesc ? ` (${groupDesc})` : ""}` : "";
+    const cols = pickColumns(rows);
+    const rowHtml = rows.slice(0, 12).map((r) => {
+      if (!r || typeof r !== "object") return "";
+      const c1 = toText(r[cols[0]]);
+      const c2 = toText(r[cols[1]]);
+      const c3 = toText(r[cols[2]]);
+      const fallbackText = toText(r.name || r.description || r.title || r.id || "");
+      return (
+        `<div class="nr-service">` +
+        `<span class="nr-eta">${escapeHtml(c1 || "--")}</span>` +
+        `<span class="nr-plat">${escapeHtml(c2 || "--")}</span>` +
+        `<span class="nr-dest">${escapeHtml(c3 || fallbackText || "--")}</span>` +
+        `</div>`
+      );
+    }).join("");
+    const rawPreview = escapeHtml(JSON.stringify(payload, null, 2).slice(0, 1400));
+    bodyHtml =
+      (groupLine ? `<div class="nr-card-meta">Group: ${escapeHtml(groupLine)}</div>` : "") +
+      (rowHtml || `<pre style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:8px 0 0 0;">${rawPreview}</pre>`);
   } else {
     const raw = String(data?.raw || "");
     summary = `${raw.length} chars`;
-    preview = escapeHtml(raw.slice(0, 1800));
+    bodyHtml = `<pre style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:8px 0 0 0;">${escapeHtml(raw.slice(0, 1600))}</pre>`;
   }
 
   wrap.innerHTML =
     `<div class="nr-card">` +
-    `<div class="nr-card-title">${escapeHtml(title)}</div>` +
+    `<div class="nr-card-title">${escapeHtml(feed.label)} <span class="nr-card-meta" title="${escapeHtml(feed.help)}" style="cursor:help;">[?]</span></div>` +
     `<div class="nr-card-meta">Content-Type: ${ct} | ${escapeHtml(summary)}</div>` +
-    `<pre style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:8px 0 0 0;">${preview}</pre>` +
+    bodyHtml +
     `</div>`;
 }
 
-async function runRailDataQuickCheck(path, title) {
+async function runRailDataQuickCheck(path, feedKey) {
   try {
     const data = await fetchRailDataRaw(path);
-    renderRailDataResult(title, data);
-    setStatus(`RailData loaded: ${title}`);
+    renderRailDataResult(feedKey, data);
+    setStatus(`RailData loaded: ${feedKey}`);
   } catch (e) {
     const wrap = document.getElementById("raildata-results");
     if (wrap) {
-      wrap.innerHTML = `<div class="nr-alert">RailData failed (${escapeHtml(title)}): ${escapeHtml(String(e?.message || e))}</div>`;
+      wrap.innerHTML = `<div class="nr-alert">RailData failed (${escapeHtml(feedKey)}): ${escapeHtml(String(e?.message || e))}</div>`;
     }
     setStatus("RailData fetch failed");
   }
@@ -359,21 +513,108 @@ async function geocodeStationName(stationName) {
   if (NR.stationGeoCache.has(key)) return NR.stationGeoCache.get(key);
 
   try {
-    const q = new URLSearchParams({
-      q: `${stationName} railway station uk`,
-      limit: "1"
-    });
-    const r = await fetchNrJson(`/geo/search?${q.toString()}`);
-    const hit = Array.isArray(r) ? r[0] : null;
-    const lat = Number(hit?.lat);
-    const lon = Number(hit?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const stations = await fetchStationSuggestions(stationName, 8);
+    const exact = stations.find((s) => String(s?.name || "").trim().toLowerCase() === key) || stations[0];
+    const lat = Number(exact?.lat);
+    const lon = Number(exact?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error("no station lat/lon");
     const latLng = [lat, lon];
     NR.stationGeoCache.set(key, latLng);
+    const crs = String(exact?.crs || "").toUpperCase();
+    if (crs) NR.stationGeoByCrsCache.set(crs, latLng);
     return latLng;
   } catch (_) {
-    return null;
+    try {
+      const q = new URLSearchParams({
+        q: `${stationName} railway station uk`,
+        limit: "1"
+      });
+      const r = await fetchNrJson(`/geo/search?${q.toString()}`);
+      const hit = Array.isArray(r) ? r[0] : null;
+      const lat = Number(hit?.lat);
+      const lon = Number(hit?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      const latLng = [lat, lon];
+      NR.stationGeoCache.set(key, latLng);
+      return latLng;
+    } catch (_) {
+      return null;
+    }
   }
+}
+
+async function geocodeStationByCrs(crs, fallbackName = "") {
+  const key = String(crs || "").trim().toUpperCase();
+  if (!key || !/^[A-Z]{3}$/.test(key)) {
+    return fallbackName ? geocodeStationName(fallbackName) : null;
+  }
+  if (NR.stationGeoByCrsCache.has(key)) return NR.stationGeoByCrsCache.get(key);
+  try {
+    const stations = await fetchStationSuggestions(key, 8);
+    const exact = stations.find((s) => String(s?.crs || "").toUpperCase() === key) || stations[0];
+    const lat = Number(exact?.lat);
+    const lon = Number(exact?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      const latLng = [lat, lon];
+      NR.stationGeoByCrsCache.set(key, latLng);
+      if (exact?.name) NR.stationGeoCache.set(String(exact.name).toLowerCase(), latLng);
+      return latLng;
+    }
+  } catch (_) {
+    // ignore and try fallback below
+  }
+  if (fallbackName) return geocodeStationName(fallbackName);
+  return null;
+}
+
+async function buildRailServicePath(board, entry, detail, originLatLng) {
+  const boardStop = {
+    crs: String(board?.crs || "").trim().toUpperCase(),
+    name: String(board?.locationName || "").trim()
+  };
+  const svc = detail?.service && typeof detail.service === "object" ? detail.service : {};
+  const rawStops = Array.isArray(svc.callingPoints) ? svc.callingPoints : [];
+  const deduped = [];
+  const seen = new Set();
+  rawStops.forEach((stop) => pushUniqueStop(deduped, seen, stop));
+  pushUniqueStop(deduped, seen, boardStop);
+
+  let pathStops = deduped;
+  if (deduped.length >= 2) {
+    const boardIdx = deduped.findIndex((s) =>
+      (boardStop.crs && s.crs === boardStop.crs) ||
+      (boardStop.name && s.name.toLowerCase() === boardStop.name.toLowerCase())
+    );
+    if (boardIdx >= 0) {
+      pathStops = NR.boardType === "arrivals"
+        ? deduped.slice(0, boardIdx + 1)
+        : deduped.slice(boardIdx);
+    }
+  }
+
+  if (pathStops.length < 2) pathStops = [
+    boardStop,
+    { crs: "", name: String(entry?.name || "").trim() }
+  ];
+
+  const coords = [];
+  let prev = null;
+  for (const stop of pathStops) {
+    const latLng = stop.crs
+      ? await geocodeStationByCrs(stop.crs, stop.name)
+      : await geocodeStationName(stop.name);
+    if (!latLng) continue;
+    if (prev && geoDistanceKm(prev[0], prev[1], latLng[0], latLng[1]) < 0.15) continue;
+    coords.push(latLng);
+    prev = latLng;
+  }
+
+  if (coords.length >= 2) return coords;
+  if (Array.isArray(originLatLng) && originLatLng.length === 2) {
+    const dest = await geocodeStationName(entry?.name || "");
+    if (dest) return [originLatLng, dest];
+  }
+  return null;
 }
 
 function ensureNrRoutesLayer() {
@@ -412,64 +653,11 @@ function addNrStationNode(routesLayer, latLng, label, emphasis = false) {
   return marker;
 }
 
-async function plotApproxRailSpokes(crs) {
-  if (!crs) return;
-  if (!map.hasLayer(layers.national_rail)) return;
-  clearNrRoutes();
-  try {
-    const data = await fetchNrJson(`/nre/stations?crs=${encodeURIComponent(crs)}&limit=14`);
-    const base = data?.base;
-    const stations = Array.isArray(data?.stations) ? data.stations : [];
-    const baseLat = Number(base?.lat);
-    const baseLon = Number(base?.lon);
-    if (!Number.isFinite(baseLat) || !Number.isFinite(baseLon)) return;
-
-    const routesLayer = ensureNrRoutesLayer();
-    addNrStationNode(routesLayer, [baseLat, baseLon], `${base?.name || crs} (${crs})`, true);
-
-    const entries = stations
-      .map((st) => ({
-        name: String(st?.name || "").trim(),
-        lat: Number(st?.lat),
-        lon: Number(st?.lon),
-        distanceKm: st?.distanceKm
-      }))
-      .filter((st) => st.name && Number.isFinite(st.lat) && Number.isFinite(st.lon))
-      .slice(0, 16);
-
-    NR.lastRouteSignature = buildNrRouteSignature(base?.name || crs, entries.map((e) => ({ name: e.name, count: 1 })));
-
-    for (const st of entries) {
-      const lat = st.lat;
-      const lon = st.lon;
-      addNrStationNode(routesLayer, [lat, lon], st.name);
-      const line = L.polyline([[baseLat, baseLon], [lat, lon]], {
-        pane: "nrRoutesPane",
-        color: "#7dd3fc",
-        weight: 4.1,
-        opacity: 0.9,
-        className: "nr-service-line"
-      }).addTo(routesLayer);
-      line.bindTooltip(
-        `${base?.name || crs} -> ${st.name} (${st.distanceKm || "?"} km)`,
-        { sticky: true, direction: "top", opacity: 0.95 }
-      );
-      NR.routeLines.push(line);
-    }
-
-    if (NR.routeLines.length) {
-      setStatus(`National Rail network spokes shown for ${crs}`);
-    }
-  } catch (_) {
-    // ignore fallback failures
-  }
-}
-
 async function plotNrServiceLines(board, services) {
   if (!board?.locationName || !Array.isArray(services) || !services.length) return;
   if (!map.hasLayer(layers.national_rail)) return;
 
-  const origin = await geocodeStationName(board.locationName);
+  const origin = await geocodeStationByCrs(board.crs, board.locationName);
   if (!origin) return;
 
   const destinationAgg = new Map();
@@ -480,7 +668,12 @@ async function plotNrServiceLines(board, services) {
       if (!name) continue;
       const key = name.toLowerCase();
       if (!destinationAgg.has(key)) {
-        destinationAgg.set(key, { name, count: 0, eta: svc.eta || svc.etd || svc.sta || svc.std || "--" });
+        destinationAgg.set(key, {
+          name,
+          count: 0,
+          eta: svc.eta || svc.etd || svc.sta || svc.std || "--",
+          serviceID: String(svc.serviceID || "")
+        });
       }
       destinationAgg.get(key).count += 1;
     }
@@ -497,16 +690,25 @@ async function plotNrServiceLines(board, services) {
   const routesLayer = ensureNrRoutesLayer();
   addNrStationNode(routesLayer, origin, `${board.locationName} (${board.crs || NR.crs})`, true);
 
-  const destinations = await Promise.all(
-    entries.map(async (entry) => ({ entry, dest: await geocodeStationName(entry.name) }))
-  );
+  const destinations = await Promise.all(entries.map(async (entry) => {
+    let detail = null;
+    if (entry.serviceID) {
+      try {
+        detail = await fetchServiceDetails(entry.serviceID);
+      } catch (_) {
+        detail = null;
+      }
+    }
+    const routeCoords = await buildRailServicePath(board, entry, detail, origin);
+    return { entry, routeCoords };
+  }));
 
   for (const item of destinations) {
     const entry = item.entry;
-    const dest = item.dest;
-    if (!dest) continue;
-    addNrStationNode(routesLayer, dest, entry.name);
-    const line = L.polyline([origin, dest], {
+    const routeCoords = Array.isArray(item.routeCoords) ? item.routeCoords : [];
+    if (routeCoords.length < 2) continue;
+    addNrStationNode(routesLayer, routeCoords[routeCoords.length - 1], entry.name);
+    const line = L.polyline(routeCoords, {
       pane: "nrRoutesPane",
       color: "#38bdf8",
       weight: 4.6,
@@ -545,7 +747,10 @@ function renderNrResults(payload) {
     `<div class="nr-card-meta">${escapeHtml(payload.type || NR.boardType)} | Updated ${escapeHtml(generated)} | ${services.length} service${services.length === 1 ? "" : "s"}</div>`;
 
   if (Array.isArray(board.nrccMessages) && board.nrccMessages.length) {
-    html += `<div class="nr-alert">${escapeHtml(board.nrccMessages[0])}</div>`;
+    const firstMsg = extractNrccMessageText(board.nrccMessages[0]);
+    if (firstMsg && firstMsg !== "[object Object]") {
+      html += `<div class="nr-alert">${escapeHtml(firstMsg)}</div>`;
+    }
   }
 
   if (!services.length) {
@@ -629,6 +834,7 @@ function clearNrState() {
   layers.national_rail.clearLayers();
   clearNrRoutes();
   NR.markers.clear();
+  NR.serviceDetailCache.clear();
   NR.crs = "";
   NR.lastRouteSignature = "";
   const wrap = document.getElementById("nr-results");
@@ -643,10 +849,6 @@ async function refreshNrBoard() {
     if (data?.board) {
       await upsertNrStationMarker(data.board);
       await plotNrServiceLines(data.board, data.board.services || []);
-      // Ensure route context is always visible even when feed lacks destination/origin fields.
-      if (!NR.routeLines.length) {
-        await plotApproxRailSpokes(NR.crs);
-      }
       if (data.board.locationName) {
         setStatus(`National Rail ${NR.boardType}: ${data.board.locationName} (${NR.crs})`);
       }
@@ -658,11 +860,8 @@ async function refreshNrBoard() {
       const detail = String(e?.message || "National Rail feed unavailable");
       wrap.innerHTML = `<div class="nr-empty">${escapeHtml(detail)}</div>`;
       if (!NR.health.configured) {
-        wrap.innerHTML += '<div class="nr-alert">Rail live feed credentials not configured (Signalbox or Darwin).</div>';
+        wrap.innerHTML += '<div class="nr-alert">Rail live feed credentials not configured for RailData.</div>';
       }
-    }
-    if (!NR.health.configured && NR.crs) {
-      await plotApproxRailSpokes(NR.crs);
     }
     setStatus("National Rail fetch failed");
   }
@@ -703,21 +902,50 @@ function initNationalRail() {
   fetchNrHealth().then((health) => {
     if (!wrap) return;
     if (!health.configured) {
-      wrap.innerHTML = '<div class="nr-empty">Rail provider not fully configured</div><div class="nr-alert">Set one provider: `SIGNALBOX_API_KEY`, `NRE_LDBWS_TOKEN`, or RailData live board keys (`RAILDATA_LIVE_DEPARTURE_API_KEY` / `RAILDATA_LIVE_BOARD_API_KEY`). Station search still works.</div>';
+      const base = String(window.__CONTROL_ROOM_API_BASE || "").trim();
+      const hostedWorker = /workers\.dev/i.test(base);
+      const fallback = health?.fallback || {};
+      const depReady = !!fallback?.raildata_departures_ready;
+      const arrReady = !!fallback?.raildata_arrivals_ready;
+      const raildataState = `RailData fallback: departures ${depReady ? "ready" : "not ready"}, arrivals ${arrReady ? "ready" : "not ready"}.`;
+      const hostedHint = hostedWorker
+        ? "This hosted proxy currently lacks live rail endpoints. Use `http://localhost:8000` (dev proxy) or deploy worker rail routes."
+        : "Set RailData live board keys (`RAILDATA_LIVE_DEPARTURE_API_KEY` / `RAILDATA_LIVE_BOARD_API_KEY`).";
+      wrap.innerHTML =
+        '<div class="nr-empty">Rail provider not fully configured</div>' +
+        `<div class="nr-alert">API base: ${escapeHtml(base || "(unset)")}. ${escapeHtml(raildataState)} ${escapeHtml(hostedHint)} Station search still works.</div>`;
     }
   });
 
-  rdDisruptionsBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/disruptions", "NationalRail Disruptions"));
-  rdPerformanceBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/performance?stanoxGroup=EMR", "NWR Realtime Performance"));
-  rdReferenceBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/reference?currentVersion=1.0", "Reference Data"));
-  rdNaptanBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/naptan", "NaPTAN"));
-  rdNptgBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/nptg", "NPTG"));
-  rdFeedsBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/feeds", "RailData My Feeds"));
+  if (rdDisruptionsBtn) rdDisruptionsBtn.title = "Rail disruption and incident notices";
+  if (rdPerformanceBtn) rdPerformanceBtn.title = "Realtime performance for operator groups";
+  if (rdReferenceBtn) rdReferenceBtn.title = "Reference entities such as stations/operators";
+  if (rdNaptanBtn) rdNaptanBtn.title = "NaPTAN: National Public Transport Access Nodes (stops/stations)";
+  if (rdNptgBtn) rdNptgBtn.title = "NPTG: National Public Transport Gazetteer (places/localities)";
+  if (rdFeedsBtn) rdFeedsBtn.title = "Your configured RailData feed access";
+
+  rdDisruptionsBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/disruptions", "disruptions"));
+  rdPerformanceBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/performance?stanoxGroup=EMR", "performance"));
+  rdReferenceBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/reference?currentVersion=1.0", "reference"));
+  rdNaptanBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/naptan", "naptan"));
+  rdNptgBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/nptg", "nptg"));
+  rdFeedsBtn?.addEventListener("click", () => runRailDataQuickCheck("/raildata/feeds", "feeds"));
 
   const runFetch = async () => {
     const crs = parseCrsFromInput(crsInput?.value || "");
     if (!/^[A-Z]{3}$/.test(crs)) {
       if (wrap) wrap.innerHTML = '<div class="nr-empty">Use a 3-letter CRS code (e.g. KGX)</div>';
+      return;
+    }
+    const health = await fetchNrHealth();
+    if (!health?.configured) {
+      if (wrap) {
+        const base = String(window.__CONTROL_ROOM_API_BASE || "").trim();
+        wrap.innerHTML =
+          '<div class="nr-empty">Live board unavailable in current proxy/environment</div>' +
+          `<div class="nr-alert">Current API base: ${escapeHtml(base || "(unset)")}. ` +
+          'Configure RailData on this proxy, or run the local dev proxy (`python scripts/dev_server.py`) and open from `http://localhost:8000`.</div>';
+      }
       return;
     }
     NR.crs = crs;

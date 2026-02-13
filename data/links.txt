@@ -1,5 +1,4 @@
 Nominatim — https://nominatim.org/ # Geocoding: address/postcode to lat/lon (OpenStreetMap-based)
 Overpass API — https://overpass-turbo.eu/ # Physical map context: roads, rail, buildings, infrastructure, POIs
 data.police.uk — https://data.police.uk/ # UK police jurisdictions, stations, neighbourhoods, anonymised crime data
-OpenSky Network — https://opensky-network.org/ # Live and historical aircraft position & movement data
 https://commons.wikimedia.org/w/api.php

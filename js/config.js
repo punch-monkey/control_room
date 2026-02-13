@@ -1,4 +1,4 @@
-const CONTROL_ROOM_CONFIG = {
+﻿const CONTROL_ROOM_CONFIG = {
   map: {
     center: [54.5, -3.5],
     zoom: 6,
@@ -46,10 +46,8 @@ const CONTROL_ROOM_CONFIG = {
     bikes:           "#22c55e"
   },
 
-  // OpenSky Network flight tracking
-  opensky: {
-    baseUrl: "https://opensky-network.org/api",
-    corsProxy: "https://corsproxy.io/?url=",
+  // FlightRadar-backed flight tracking
+  flights: {
     refreshInterval: 480000,  // 8 minutes (stays within 200 req/day anonymous budget)
     bbox: { lamin: 35.0, lamax: 63.0, lomin: -15.0, lomax: 20.0 }  // UK + nearby overseas corridors
   },
@@ -68,20 +66,10 @@ const CONTROL_ROOM_CONFIG = {
     arrivalCache: 30000       // cache arrivals for 30s
   },
 
-  // National Rail (Darwin LDBWS via local proxy)
+  // National Rail (RailData via local/worker proxy)
   nationalRail: {
     refreshInterval: 60000,
     defaultRows: 12
-  },
-
-  // Signalbox rail API (preferred over Darwin; currently often requires server-side proxy due CORS/auth)
-  signalbox: {
-    enabled: true,
-    baseUrl: "https://api.signalbox.io/v2.5",
-    apiKey: window.SIGNALBOX_API_KEY || "",
-    boardPath: "/trains",
-    // If true: try direct browser call first. If Signalbox blocks CORS, client falls back to /signalbox/* proxy.
-    preferDirect: true
   },
 
   // National Highways WebTRIS traffic API (roads)
@@ -93,3 +81,4 @@ const CONTROL_ROOM_CONFIG = {
     maxPlottedSites: 600
   }
 };
+

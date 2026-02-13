@@ -304,178 +304,19 @@ async function geocodePostcode(rawPostcode) {
   }
   return null;
 }
-async function ensurePostcodesForRows(rows) {
-  // Intentionally no-op: postcode lookup is now API-only via geocodePostcode().
-  return Promise.resolve(rows);
-}
+
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PSC (Persons with Significant Control)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-let PSC_MANIFEST = null;
-const PSC_NAME_CACHE = {};    // keyed by 2-char prefix (e.g. "SM"), value = array
-const PSC_CO_CACHE = {};      // keyed by chunk key (e.g. "08_03"), value = array
-const PSC_CACHE_MAX = 5;      // max cached files per type to limit memory
 
-// LRU tracking
-const _nameAccessOrder = [];
-const _coAccessOrder = [];
-
-function evictOldCache(cache, accessOrder, max) {
-  while (accessOrder.length > max) {
-    const old = accessOrder.shift();
-    delete cache[old];
-  }
-}
-
-async function loadPscManifest() {
-  try {
-    const r = await fetch("data/psc_manifest.json");
-    PSC_MANIFEST = await r.json();
-  } catch (e) {
-    console.warn("PSC manifest not found â€” run preprocess_psc_v2.py first", e);
-    PSC_MANIFEST = null;
-  }
-}
-
-// Extract 2-char surname prefix (same logic as Python preprocessor)
-const PSC_TITLES = new Set(["mr","mrs","ms","miss","dr","sir","lord","lady","dame","professor","prof","rev","reverend"]);
-function extractSurname(name) {
-  if (!name) return "";
-  const parts = name.trim().split(/\s+/);
-  const filtered = parts.filter(p => !PSC_TITLES.has(p.toLowerCase()));
-  return filtered.length ? filtered[filtered.length - 1].toUpperCase() : parts[parts.length - 1].toUpperCase();
-}
-
-function getNamePrefix(name) {
-  const surname = extractSurname(name);
-  if (!surname || surname.length < 2) return surname ? surname[0] + "X" : "ZZ";
-  const c1 = /[A-Z]/.test(surname[0]) ? surname[0] : "Z";
-  const c2 = /[A-Z]/.test(surname[1]) ? surname[1] : "Z";
-  return c1 + c2;
-}
-
-function getCompanyPrefix(coNum) {
-  if (!coNum || coNum.length < 2) return "00";
-  return coNum.substring(0, 2).toUpperCase();
-}
-
-// Find which chunk files to load for a name search
-function findNameFiles(nameQuery) {
-  if (!PSC_MANIFEST || !PSC_MANIFEST.name_index) return [];
-  const prefix = getNamePrefix(nameQuery);
-  const files = [];
-  // Look for exact prefix and sub-chunks (e.g., "SM", "SM_00", "SM_01")
-  for (const key in PSC_MANIFEST.name_index) {
-    if (key === prefix || key.startsWith(prefix + "_")) {
-      files.push({ key, ...PSC_MANIFEST.name_index[key] });
-    }
-  }
-  return files;
-}
-
-// Find which chunk files to load for a company number PSC lookup
-function findCompanyPscFiles(coNum) {
-  if (!PSC_MANIFEST || !PSC_MANIFEST.company_chunks) return [];
-  const prefix = getCompanyPrefix(coNum);
-  const files = [];
-  for (const key in PSC_MANIFEST.company_chunks) {
-    if (key === prefix || key.startsWith(prefix + "_")) {
-      files.push({ key, ...PSC_MANIFEST.company_chunks[key] });
-    }
-  }
-  return files;
-}
-
-// Load a name index file
-async function loadNameFile(key, filePath) {
-  if (PSC_NAME_CACHE[key]) {
-    // Move to end of access order
-    const idx = _nameAccessOrder.indexOf(key);
-    if (idx >= 0) _nameAccessOrder.splice(idx, 1);
-    _nameAccessOrder.push(key);
-    return PSC_NAME_CACHE[key];
-  }
-  const r = await fetch(filePath);
-  const data = await r.json();
-  PSC_NAME_CACHE[key] = data;
-  _nameAccessOrder.push(key);
-  evictOldCache(PSC_NAME_CACHE, _nameAccessOrder, PSC_CACHE_MAX);
-  return data;
-}
-
-// Load a company PSC chunk file
-async function loadCompanyPscFile(key, filePath) {
-  if (PSC_CO_CACHE[key]) {
-    const idx = _coAccessOrder.indexOf(key);
-    if (idx >= 0) _coAccessOrder.splice(idx, 1);
-    _coAccessOrder.push(key);
-    return PSC_CO_CACHE[key];
-  }
-  const r = await fetch(filePath);
-  const data = await r.json();
-  PSC_CO_CACHE[key] = data;
-  _coAccessOrder.push(key);
-  evictOldCache(PSC_CO_CACHE, _coAccessOrder, PSC_CACHE_MAX);
-  return data;
-}
-
-// Search by person name â€” loads relevant name chunk files progressively
-async function searchPersonByName(nameQuery, limit) {
-  limit = limit || 200;
-  const files = findNameFiles(nameQuery);
-  if (!files.length) return [];
-
-  const queryLower = nameQuery.trim().toLowerCase();
-  const results = [];
-
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    setPscProgress(`Loading ${i + 1}/${files.length}...`, Math.round(((i + 1) / files.length) * 100));
-    try {
-      const data = await loadNameFile(f.key, f.file);
-      for (let j = 0; j < data.length; j++) {
-        if (data[j].n.toLowerCase().includes(queryLower)) {
-          results.push(data[j]);
-          if (results.length >= limit) return results;
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to load name file:", f.file, e);
-    }
-  }
-  return results;
-}
-
-// Search PSC by company number â€” loads relevant company chunk files
-async function searchPscByCompany(coNum) {
-  const files = findCompanyPscFiles(coNum);
-  if (!files.length) return [];
-
-  const coUpper = coNum.toUpperCase().trim();
-  const results = [];
-
-  for (const f of files) {
-    try {
-      const data = await loadCompanyPscFile(f.key, f.file);
-      for (let j = 0; j < data.length; j++) {
-        if (data[j].c === coUpper) {
-          results.push(data[j]);
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to load PSC chunk:", f.file, e);
-    }
-  }
-  return results;
-}
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // MAP
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-const map = L.map("map", { zoomControl: true }).setView(
+const map = L.map("map", { zoomControl: false }).setView(
   CONTROL_ROOM_CONFIG.map.center, CONTROL_ROOM_CONFIG.map.zoom
 );
 
@@ -494,6 +335,65 @@ map.getPane("nrStationsPane").style.zIndex = 475;
 
 // Scale bar
 L.control.scale({ imperial: false, position: "bottomright" }).addTo(map);
+L.control.zoom({ position: "bottomleft" }).addTo(map);
+
+function makePanelDraggable(panelEl, handleEl) {
+  if (!panelEl || !handleEl) return;
+  if (panelEl.dataset.dragInit === "1") return;
+  panelEl.dataset.dragInit = "1";
+  handleEl.classList.add("panel-draggable-handle");
+
+  const DRAG_MARGIN = 8;
+  let dragState = null;
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function onPointerMove(e) {
+    if (!dragState) return;
+    const width = panelEl.offsetWidth || dragState.width;
+    const height = panelEl.offsetHeight || dragState.height;
+    const maxX = Math.max(DRAG_MARGIN, window.innerWidth - width - DRAG_MARGIN);
+    const maxY = Math.max(DRAG_MARGIN, window.innerHeight - height - DRAG_MARGIN);
+    const nextLeft = clamp(e.clientX - dragState.dx, DRAG_MARGIN, maxX);
+    const nextTop = clamp(e.clientY - dragState.dy, DRAG_MARGIN, maxY);
+    panelEl.style.left = `${nextLeft}px`;
+    panelEl.style.top = `${nextTop}px`;
+    panelEl.style.right = "auto";
+    panelEl.style.bottom = "auto";
+  }
+
+  function onPointerUp() {
+    if (!dragState) return;
+    dragState = null;
+    panelEl.classList.remove("panel-dragging");
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerUp);
+  }
+
+  handleEl.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("button, input, select, textarea, a, summary")) return;
+    const rect = panelEl.getBoundingClientRect();
+    dragState = {
+      dx: e.clientX - rect.left,
+      dy: e.clientY - rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+    panelEl.classList.add("panel-dragging");
+    panelEl.style.left = `${rect.left}px`;
+    panelEl.style.top = `${rect.top}px`;
+    panelEl.style.right = "auto";
+    panelEl.style.bottom = "auto";
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    e.preventDefault();
+  });
+}
 
 // â”€â”€ Tile layers â”€â”€
 
@@ -1009,6 +909,10 @@ function closeEntityPanel() {
   const panel = document.getElementById('entity-placement-panel');
   panel.classList.remove('open');
   panel.classList.remove("minimized");
+  panel.style.left = "";
+  panel.style.top = "";
+  panel.style.right = "";
+  panel.style.bottom = "";
   const minBtn = document.getElementById("entity-panel-minimize");
   if (minBtn) {
     minBtn.textContent = "-";
@@ -1880,172 +1784,6 @@ function suggestIcon(name, category = null) {
   return null;
 }
 
-function getIconByCategory(category) {
-  return ICON_CATEGORIES[category] || ICON_CATEGORIES.people;
-}
-
-function getAllIcons() {
-  const allIcons = [];
-  for (const [catId, cat] of Object.entries(ICON_CATEGORIES)) {
-    cat.icons.forEach(icon => {
-      allIcons.push({ ...icon, category: catId, categoryName: cat.name, categoryColor: cat.color });
-    });
-  }
-  return allIcons;
-}
-
-const MIL_SYMBOL_SOURCE_FILES = [
-  "gfx/joint-military-symbology-xml-dev/samples/imagefile_name_category_tags/Military-Air-Source-Icons.csv",
-  "gfx/joint-military-symbology-xml-dev/samples/imagefile_name_category_tags/Military-Land-Unit-Source-Icons.csv",
-  "gfx/joint-military-symbology-xml-dev/samples/imagefile_name_category_tags/Military-Sea-Surface-Source-Icons.csv",
-  "gfx/joint-military-symbology-xml-dev/samples/imagefile_name_category_tags/Military-Sigint-Source-Icons.csv"
-];
-let MIL_SYMBOL_INDEX = [];
-
-function parseCsvRows(text) {
-  const rows = [];
-  const lines = String(text || "").split(/\r?\n/).filter((l) => l.trim());
-  if (!lines.length) return rows;
-  const parseLine = (line) => {
-    const out = [];
-    let cur = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (ch === "," && !inQuotes) {
-        out.push(cur);
-        cur = "";
-      } else {
-        cur += ch;
-      }
-    }
-    out.push(cur);
-    return out.map((v) => v.trim());
-  };
-
-  const headers = parseLine(lines[0]);
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseLine(lines[i]);
-    const row = {};
-    headers.forEach((h, idx) => {
-      row[h] = values[idx] || "";
-    });
-    rows.push(row);
-  }
-  return rows;
-}
-
-function symbolSvgPathFromFilePath(sourcePath) {
-  const raw = String(sourcePath || "");
-  const m = raw.match(/Appendices\\([^\\]+)\\([^\\]+)\.emf$/i);
-  if (!m) return "";
-  return `gfx/joint-military-symbology-xml-dev/svg/Appendices/${m[1]}/${m[2]}.svg`;
-}
-
-function hydrateMilitarySymbolDropdown() {
-  const select = document.getElementById("entity-mil-symbol-select");
-  if (!select) return;
-  if (MIL_SYMBOL_INDEX.length) {
-    const top = MIL_SYMBOL_INDEX.slice(0, 450);
-    select.innerHTML = '<option value="">Select military symbol...</option>' +
-      top.map((s) => `<option value="${escapeHtml(s.sidc)}">${escapeHtml(`${s.sidc} | ${s.name}`)}</option>`).join("");
-    return;
-  }
-  const fallbackIcons = (ICON_CATEGORIES.military?.icons || []).slice(0, 80);
-  select.innerHTML = '<option value="">Select military symbol...</option>' +
-    fallbackIcons.map((s) => `<option value="ICON:${escapeHtml(String(s.id || ""))}">${escapeHtml(`ICON | ${s.name || s.id || "Military icon"}`)}</option>`).join("");
-}
-
-async function loadMilitarySymbolsCatalog() {
-  const entries = [];
-  for (const file of MIL_SYMBOL_SOURCE_FILES) {
-    try {
-      const r = await fetch(file);
-      if (!r.ok) continue;
-      const text = await r.text();
-      const rows = parseCsvRows(text);
-      for (const row of rows.slice(0, 300)) {
-        const sidc = String(row.styleItemUniqueId || "").trim();
-        const name = String(row.styleItemName || "").trim();
-        const svgPath = symbolSvgPathFromFilePath(row.filePath || "");
-        if (!sidc || !name || !svgPath) continue;
-        entries.push({
-          sidc,
-          name,
-          icon: svgPath,
-          search: `${sidc} ${name} ${row.styleItemTags || ""}`.toLowerCase()
-        });
-      }
-    } catch (err) {
-      console.warn("Military symbol source load failed:", file, err);
-    }
-  }
-
-  const bySidc = {};
-  for (const e of entries) {
-    if (!bySidc[e.sidc]) bySidc[e.sidc] = e;
-  }
-  MIL_SYMBOL_INDEX = Object.values(bySidc).sort((a, b) => a.name.localeCompare(b.name));
-  hydrateMilitarySymbolDropdown();
-}
-
-function getMilitarySelectionForPlacement(rawInput) {
-  const text = String(rawInput || "").trim().toLowerCase();
-  if (!text) return null;
-  if (text.startsWith("icon:")) {
-    const iconId = text.slice(5);
-    const icon = (ICON_CATEGORIES.military?.icons || []).find((ic) => String(ic.id || "").toLowerCase() === iconId);
-    if (!icon) return null;
-    return {
-      sidc: `ICON:${icon.id}`,
-      name: icon.name || icon.id || "Military icon",
-      icon: icon.icon,
-      search: `${icon.id} ${icon.name}`.toLowerCase()
-    };
-  }
-  const first = MIL_SYMBOL_INDEX.find((s) => `${s.sidc} | ${s.name}`.toLowerCase() === text);
-  if (first) return first;
-  return MIL_SYMBOL_INDEX.find((s) => s.search.includes(text) || s.sidc.toLowerCase() === text) || null;
-}
-
-function applyMilitarySelectionToForm(selection) {
-  if (!selection) return false;
-  const categorySelect = document.getElementById("entity-category");
-  const iconSelect = document.getElementById("entity-icon");
-  if (!categorySelect || !iconSelect) return false;
-
-  categorySelect.value = "military";
-  const catalog = ICON_CATEGORIES.military;
-  const dynamicId = `mil_sidc_${selection.sidc}`;
-  let existing = catalog.icons.find((ic) => ic.id === dynamicId);
-  if (!existing) {
-    existing = {
-      id: dynamicId,
-      name: `${selection.name} (${selection.sidc})`,
-      icon: selection.icon,
-      keywords: [selection.sidc, selection.name.toLowerCase(), "military", "sidc"]
-    };
-    catalog.icons.unshift(existing);
-    if (catalog.icons.length > 200) catalog.icons = catalog.icons.slice(0, 200);
-  }
-  updateIconDropdown("military");
-  const idx = catalog.icons.findIndex((ic) => ic.id === dynamicId);
-  if (idx >= 0) {
-    iconSelect.value = String(idx);
-    updateEntityIconPreview("military", idx);
-    ENTITY_ICON_MANUAL_OVERRIDE = true;
-    return true;
-  }
-  return false;
-}
-
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CONNECTION MANAGEMENT
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -2798,6 +2536,43 @@ function hasPscAutoConnection(fromId, toId) {
   });
 }
 
+function isAircraftEntityIcon(iconData = null, i2EntityData = null) {
+  const id = String(iconData?.id || "").toLowerCase();
+  const category = String(iconData?.categoryName || "").toLowerCase();
+  const name = String(iconData?.name || "").toLowerCase();
+  const i2Name = String(i2EntityData?.entityName || "").toLowerCase();
+  if (id === "aircraft" || id === "aircraft_large") return true;
+  if (i2Name === "aircraft") return true;
+  return category.includes("aviation") && (name.includes("aircraft") || name.includes("plane") || name.includes("flight"));
+}
+
+function createAircraftEntityDivIcon() {
+  const svg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 0 1 .4 1 1v7.1l7.4 3.3c.5.2.8.7.7 1.2l-.3 1.4c-.1.6-.7 1-1.3.8l-6.5-1.7v3.9l2 1.5c.3.2.5.6.5 1v.8c0 .6-.5 1-1.1.9L12 22l-2.9.9c-.6.1-1.1-.3-1.1-.9v-.8c0-.4.2-.8.5-1l2-1.5v-3.9l-6.5 1.7c-.6.2-1.2-.2-1.3-.8l-.3-1.4c-.1-.5.2-1 .7-1.2L10.9 10.1V3c0-.6.4-1 1-1z"/></svg>';
+  const html =
+    `<div class="flight-icon flight-transit" style="--flight-icon-size:20px">` +
+      `<span class="flight-inner" style="transform:rotate(0deg)">` +
+        `${svg}` +
+      `</span>` +
+    `</div>`;
+  return L.divIcon({
+    className: "flight-marker entity-aircraft-marker",
+    html,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+    popupAnchor: [0, -14]
+  });
+}
+
+function createEntityMarkerIcon(iconData = {}, i2EntityData = null) {
+  if (isAircraftEntityIcon(iconData, i2EntityData)) return createAircraftEntityDivIcon();
+  return L.icon({
+    iconUrl: iconData.icon,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -16]
+  });
+}
+
 function placeEntity(latLng, iconData, label = '', address = '', notes = '', i2EntityData = null) {
   const entityId = `entity_${Date.now()}_${Math.random()}`;
   const coords = normalizeLatLng(latLng);
@@ -2806,12 +2581,7 @@ function placeEntity(latLng, iconData, label = '', address = '', notes = '', i2E
     return null;
   }
   
-  const icon = L.icon({
-    iconUrl: iconData.icon,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-    popupAnchor: [0, -16]
-  });
+  const icon = createEntityMarkerIcon(iconData, i2EntityData);
   
   const marker = L.marker(coords, { icon: icon, draggable: true });
   
@@ -3986,7 +3756,7 @@ async function ensurePoliceAreasLoaded() {
     })
     .catch((e) => {
       console.warn("Police areas:", e);
-      markOsDerivedLayerUnavailable("areas", "Police force area data unavailable.");
+      setStatus("Police force area data unavailable");
       return false;
     })
     .finally(() => {
@@ -4284,7 +4054,6 @@ const OS_DERIVED_STATE = {
   railLayer: null,
   roadsStatic: false,
   railStatic: false,
-  roadsRenderSig: "",
   railRenderSig: "",
   roadsStaticRenderSig: "",
   railStaticRenderSig: "",
@@ -4326,6 +4095,10 @@ function markLayerAsStaticMode(layerKey, label = "static") {
   const txt = String(nameEl.textContent || "");
   if (!txt.includes("(static)")) {
     nameEl.textContent = `${txt} (${label})`;
+  }
+  if (layerKey === "os_rail") {
+    row.title = "Layer loaded from static UK rail network geometry";
+    return;
   }
   row.title = `Layer loaded using ${label} pre-baked coordinates`;
 }
@@ -4401,15 +4174,11 @@ function osRoadColorForFeature(properties = {}) {
 
 function osRailColorForFeature(properties = {}) {
   const kind = String(properties.railway || "").toLowerCase();
-  const name = String(properties.name || "").trim().toLowerCase();
-  if (name) {
-    const base = OS_RAIL_LINE_PALETTE[hashStringToInt(`${kind}|${name}`) % OS_RAIL_LINE_PALETTE.length];
-    if (kind === "subway" || kind === "light_rail" || kind === "tram") return tweakHexColor(base, 8);
-    if (kind === "narrow_gauge") return tweakHexColor(base, -6);
-    return base;
-  }
   if (kind === "subway" || kind === "light_rail" || kind === "tram") return "#22d3ee";
   if (kind === "narrow_gauge") return "#818cf8";
+  if (kind === "rail") return "#38bdf8";
+  if (kind === "disused" || kind === "abandoned") return "#64748b";
+  if (kind === "construction") return "#f59e0b";
   return "#60a5fa";
 }
 
@@ -4475,17 +4244,9 @@ function featureInBounds(feature, bounds) {
   return false;
 }
 
-function roadVisibleAtZoom(properties = {}, zoom = 0) {
-  const highway = String(properties.highway || "").toLowerCase();
-  if (zoom <= 7) return highway === "motorway" || highway === "trunk";
-  if (zoom <= 9) return highway === "motorway" || highway === "trunk" || highway === "primary";
-  return true;
-}
-
 function railVisibleAtZoom(properties = {}, zoom = 0) {
-  const name = String(properties.name || "").trim();
   const kind = String(properties.railway || "").toLowerCase();
-  if (zoom <= 7) return !!name && (kind === "rail" || kind === "subway" || kind === "light_rail");
+  if (zoom <= 7) return kind === "rail" || kind === "subway" || kind === "light_rail" || kind === "tram";
   if (zoom <= 9) return kind === "rail" || kind === "subway" || kind === "light_rail";
   return true;
 }
@@ -4520,11 +4281,187 @@ function staticRoadVisibleAtZoom(type = "", zoom = 0) {
   return true;
 }
 
+function normalizeRoadRouteName(name = "") {
+  return String(name || "").trim().toLowerCase();
+}
+
+function staticRoadMajorThresholdKm(zoom = 0) {
+  if (zoom <= 7) return 22;
+  if (zoom <= 9) return 12;
+  return 4;
+}
+
+function staticRoadPriorityScore(route = {}, totalKm = 0) {
+  const t = String(route?.type || "").toLowerCase();
+  const name = normalizeRoadRouteName(route?.name);
+  const coords = Array.isArray(route?.coords) ? route.coords : [];
+  const segKm = routeLengthKm(coords);
+  const effectiveKm = Math.max(Number(totalKm || 0), segKm);
+
+  let score = 0;
+  // Road class baseline.
+  if (t === "motorway") score += 30;
+  else if (t === "trunk") score += 22;
+  else if (t === "primary") score += 14;
+  else if (t === "secondary") score += 8;
+  else if (t === "tertiary") score += 3;
+
+  // Strategic route references in name.
+  if (/\bm\d{1,3}\b/.test(name)) score += 18;          // M1, M62, etc.
+  if (/\ba\d{1,3}(\(m\))?\b/.test(name)) score += 10;  // A1, A14, A1(M)
+  if (/\(m\)/.test(name)) score += 6;                  // A-road motorway sections
+
+  // Corridor-style names.
+  if (/ring road|orbital|bypass/.test(name)) score += 6;
+  if (/north|south|east|west/.test(name)) score += 2;
+
+  // Scale influence.
+  score += Math.min(12, Math.round(effectiveKm * 0.16));
+  if (effectiveKm >= 80) score += 4;
+  if (effectiveKm >= 120) score += 4;
+  return score;
+}
+
+function isMajorStaticRoadRoute(route = {}, totalKm = 0, zoom = 0) {
+  const t = String(route?.type || "").toLowerCase();
+  if (!(t === "motorway" || t === "trunk" || t === "primary" || t === "secondary" || t === "tertiary")) return false;
+  const coords = Array.isArray(route?.coords) ? route.coords : [];
+  const segKm = routeLengthKm(coords);
+  const threshold = staticRoadMajorThresholdKm(zoom);
+  const score = staticRoadPriorityScore(route, totalKm);
+  const scoreThreshold = zoom <= 7 ? 22 : (zoom <= 9 ? 16 : 10);
+  if (score >= scoreThreshold) return true;
+  if (Number(totalKm || 0) >= threshold) return true;
+  return segKm >= Math.max(0.8, threshold * 0.2);
+}
+
 function staticRailVisibleAtZoom(type = "", zoom = 0) {
   const t = String(type || "").toLowerCase();
   if (zoom <= 7) return t === "rail" || t === "light_rail" || t === "subway" || t === "tram";
   if (zoom <= 9) return t === "rail" || t === "light_rail" || t === "subway" || t === "tram" || t === "narrow_gauge";
   return true;
+}
+
+function staticRailMajorThresholdKm(zoom = 0) {
+  if (zoom <= 7) return 14;
+  if (zoom <= 9) return 7;
+  return 2;
+}
+
+function normalizeRailRouteName(name = "") {
+  return String(name || "").trim().toLowerCase();
+}
+
+function staticRailPriorityScore(route = {}, totalKm = 0) {
+  const t = String(route?.type || "").toLowerCase();
+  if (!(t === "rail" || t === "light_rail" || t === "subway" || t === "tram")) return 0;
+  const name = normalizeRailRouteName(route?.name);
+  const coords = Array.isArray(route?.coords) ? route.coords : [];
+  const segKm = routeLengthKm(coords);
+  const effectiveKm = Math.max(Number(totalKm || 0), segKm);
+
+  let score = 0;
+  // Length matters, but should not dominate named trunk corridors.
+  score += Math.min(14, Math.round(effectiveKm * 0.22));
+  if (effectiveKm >= 40) score += 4;
+  if (effectiveKm >= 70) score += 3;
+
+  if (/main line/.test(name)) score += 22;
+  if (/high speed|hs1|hs2/.test(name)) score += 20;
+  if (/cross country|cross-country/.test(name)) score += 14;
+  if (/coast|coastway/.test(name)) score += 12;
+  if (/east coast|west coast|midland|great western|great eastern|south western|south west/.test(name)) score += 12;
+  if (/thameslink|elizabeth line|north london line|chiltern|brighton|chatham|highland|settle-carlisle/.test(name)) score += 9;
+  if (/branch|loop|tram|metro/.test(name)) score -= 4;
+
+  if (t === "rail") score += 5;
+  if (t === "light_rail" || t === "subway" || t === "tram") score += 2;
+  return score;
+}
+
+function railDisplayRouteLimitForZoom(zoom = 0) {
+  if (zoom <= 7) return 180;
+  if (zoom <= 9) return 320;
+  if (zoom <= 11) return 520;
+  return 760;
+}
+
+function simplifyCoordsByStepKm(coords = [], minStepKm = 0.2) {
+  if (!Array.isArray(coords) || coords.length < 3) return Array.isArray(coords) ? coords.slice() : [];
+  const out = [];
+  let last = null;
+  for (let i = 0; i < coords.length; i++) {
+    const p = coords[i];
+    if (!Array.isArray(p) || p.length < 2) continue;
+    if (!last) {
+      out.push(p);
+      last = p;
+      continue;
+    }
+    if (i === coords.length - 1) {
+      out.push(p);
+      last = p;
+      continue;
+    }
+    const d = distanceKm(last, p);
+    if (Number.isFinite(d) && d >= minStepKm) {
+      out.push(p);
+      last = p;
+    }
+  }
+  if (out.length < 2 && coords.length >= 2) return [coords[0], coords[coords.length - 1]];
+  return out;
+}
+
+function simplifyRailRouteForDisplay(coords = [], zoom = 0) {
+  if (zoom <= 7) return simplifyCoordsByStepKm(coords, 0.55);
+  if (zoom <= 9) return simplifyCoordsByStepKm(coords, 0.28);
+  if (zoom <= 11) return simplifyCoordsByStepKm(coords, 0.14);
+  return simplifyCoordsByStepKm(coords, 0.08);
+}
+
+function buildRailSpineDisplayRoutes(routes = [], zoom = 0) {
+  const base = (routes || [])
+    .map((r) => ({
+      ...r,
+      type: String(r?.type || "rail").toLowerCase(),
+      name: `__spine_${String(r?.type || "rail").toLowerCase()}`
+    }))
+    .filter((r) => Array.isArray(r?.coords) && r.coords.length >= 2);
+  if (!base.length) return [];
+
+  const stitched = [...base];
+  const connectors = buildEndpointConnectors(base, zoom <= 8 ? 0.75 : 0.5);
+  for (const c of connectors) {
+    stitched.push({
+      ...c,
+      type: String(c?.type || "rail").toLowerCase(),
+      name: `__spine_${String(c?.type || "rail").toLowerCase()}`
+    });
+  }
+
+  const merged = mergeStaticRailRoutes(stitched)
+    .filter((r) => routeLengthKm(Array.isArray(r?.coords) ? r.coords : []) >= (zoom <= 8 ? 1.2 : 0.8))
+    .map((r) => ({
+      ...r,
+      displayName: (String(r?.type || "rail") === "rail") ? "National Rail Spine" : `${String(r?.type || "rail")} spine`
+    }));
+
+  return merged;
+}
+
+function isMajorStaticRailRoute(route = {}, totalKm = 0, zoom = 0) {
+  const t = String(route?.type || "").toLowerCase();
+  if (!(t === "rail" || t === "light_rail" || t === "subway" || t === "tram")) return false;
+  const coords = Array.isArray(route?.coords) ? route.coords : [];
+  const segKm = routeLengthKm(coords);
+  const threshold = staticRailMajorThresholdKm(zoom);
+  const score = staticRailPriorityScore(route, totalKm);
+  const scoreThreshold = zoom <= 7 ? 18 : (zoom <= 9 ? 12 : 8);
+  if (score >= scoreThreshold) return true;
+  if (Number(totalKm || 0) >= threshold) return true;
+  // Keep shorter fragments that are likely part of major lines.
+  return segKm >= Math.max(0.6, threshold * 0.22);
 }
 
 function distanceKm(a, b) {
@@ -4632,7 +4569,35 @@ function buildRailGapConnectors(routes = [], maxGapKm = 0.12) {
     if (!Array.isArray(group) || group.length < 2) continue;
     out.push(...buildEndpointConnectors(group, maxGapKm));
   }
-  return out;
+
+  // Additional stitching across same rail type when line naming changes between
+  // adjacent segments (common in nationwide OSM-derived extracts).
+  const byType = new Map();
+  for (const r of routes || []) {
+    const t = String(r?.type || "").toLowerCase();
+    if (!(t === "rail" || t === "light_rail" || t === "subway" || t === "tram")) continue;
+    const score = staticRailPriorityScore(r, routeLengthKm(Array.isArray(r?.coords) ? r.coords : []));
+    if (score < 12) continue;
+    if (!byType.has(t)) byType.set(t, []);
+    byType.get(t).push(r);
+  }
+  for (const group of byType.values()) {
+    if (!Array.isArray(group) || group.length < 2) continue;
+    out.push(...buildEndpointConnectors(group, Math.max(0.08, maxGapKm * 0.78)));
+  }
+
+  const dedup = [];
+  const seen = new Set();
+  for (const c of out) {
+    const a = buildCoordKey(c?.coords?.[0], 5);
+    const b = buildCoordKey(c?.coords?.[1], 5);
+    if (!a || !b) continue;
+    const k = [a, b].sort().join("|");
+    if (seen.has(k)) continue;
+    seen.add(k);
+    dedup.push(c);
+  }
+  return dedup;
 }
 
 function normalizeRoadLineKey(type = "", name = "") {
@@ -4654,7 +4619,33 @@ function buildRoadGapConnectors(routes = [], maxGapKm = 0.1) {
     if (!Array.isArray(group) || group.length < 2) continue;
     out.push(...buildEndpointConnectors(group, maxGapKm));
   }
-  return out;
+
+  // Additional stitching for strategic roads where naming changes across
+  // contiguous motorway/trunk segments.
+  const strategic = [];
+  for (const r of routes || []) {
+    const t = String(r?.type || "").toLowerCase();
+    if (!(t === "motorway" || t === "trunk" || t === "primary")) continue;
+    const score = staticRoadPriorityScore(r, routeLengthKm(Array.isArray(r?.coords) ? r.coords : []));
+    if (score < 18) continue;
+    strategic.push(r);
+  }
+  if (strategic.length >= 2) {
+    out.push(...buildEndpointConnectors(strategic, Math.max(0.1, maxGapKm * 0.82)));
+  }
+
+  const dedup = [];
+  const seen = new Set();
+  for (const c of out) {
+    const a = buildCoordKey(c?.coords?.[0], 5);
+    const b = buildCoordKey(c?.coords?.[1], 5);
+    if (!a || !b) continue;
+    const k = [a, b].sort().join("|");
+    if (seen.has(k)) continue;
+    seen.add(k);
+    dedup.push(c);
+  }
+  return dedup;
 }
 
 function routeLengthKm(coords = []) {
@@ -4723,11 +4714,11 @@ function applyOsRoadSelectionStyles() {
     const selected = hasSelection && String(seg?.lineKey || "") === selectedKey;
     const rank = Math.max(0, Math.min(1, (totalKm - minTotal) / span));
 
-    let opacity = 0.62 + (rank * 0.3);
-    let weight = baseWeight + (rank * 0.55);
+    let opacity = 0.7 + (rank * 0.24);
+    let weight = baseWeight + (rank * 0.45);
     if (hasSelection) {
-      opacity = selected ? 0.98 : 0.22;
-      weight = selected ? (baseWeight + 1.9) : Math.max(1.7, baseWeight - 1.0);
+      opacity = selected ? 0.99 : 0.12;
+      weight = selected ? (baseWeight + 2.1) : Math.max(1.4, baseWeight - 1.2);
     }
     layer.setStyle({ opacity, weight });
     if (layer._path) {
@@ -4813,11 +4804,11 @@ function applyOsRailSelectionStyles() {
     const selected = hasSelection && String(seg?.lineKey || "") === selectedKey;
     const rank = Math.max(0, Math.min(1, (totalKm - minTotal) / span));
 
-    let opacity = 0.65 + (rank * 0.28);
-    let weight = baseWeight + (rank * 0.55);
+    let opacity = 0.72 + (rank * 0.24);
+    let weight = baseWeight + (rank * 0.5);
     if (hasSelection) {
-      opacity = selected ? 0.98 : 0.24;
-      weight = selected ? (baseWeight + 1.9) : Math.max(1.8, baseWeight - 1.0);
+      opacity = selected ? 0.99 : 0.14;
+      weight = selected ? (baseWeight + 2.2) : Math.max(1.6, baseWeight - 1.2);
     }
     layer.setStyle({ opacity, weight });
     if (layer._path) {
@@ -4838,127 +4829,14 @@ window.selectOsRailLine = function selectOsRailLine(encodedLineKey = "") {
   }
   OS_DERIVED_STATE.railSelectedLineKey = lineKey;
   applyOsRailSelectionStyles();
-  if (lineKey) setStatus(`OS rail focus: ${lineKey}`);
+  if (lineKey) setStatus(`UK rail focus: ${lineKey}`);
 };
 
 window.clearOsRailLineSelection = function clearOsRailLineSelection() {
   OS_DERIVED_STATE.railSelectedLineKey = "";
   applyOsRailSelectionStyles();
-  setStatus("OS rail focus cleared");
+  setStatus("UK rail focus cleared");
 };
-
-function buildStationLinks(stations = [], bounds = null, maxKm = 28, maxLinks = 2) {
-  const links = [];
-  if (!Array.isArray(stations) || !stations.length) return { links, nodes: [] };
-  const filtered = stations.filter((s) => {
-    const lat = Number(s?.lat);
-    const lon = Number(s?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
-    return bounds ? bounds.contains([lat, lon]) : true;
-  });
-  if (filtered.length < 2) return { links, nodes: filtered };
-
-  const cellSizeDeg = Math.max(0.02, maxKm / 111);
-  const cellKey = (lat, lon) => `${Math.floor(lat / cellSizeDeg)}|${Math.floor(lon / cellSizeDeg)}`;
-  const cells = new Map();
-  filtered.forEach((s, idx) => {
-    const key = cellKey(Number(s.lat), Number(s.lon));
-    if (!cells.has(key)) cells.set(key, []);
-    cells.get(key).push(idx);
-  });
-
-  const neighbourKeys = (lat, lon) => {
-    const r = Math.floor(lat / cellSizeDeg);
-    const c = Math.floor(lon / cellSizeDeg);
-    const out = [];
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) out.push(`${r + dr}|${c + dc}`);
-    }
-    return out;
-  };
-
-  const pairSeen = new Set();
-  for (let i = 0; i < filtered.length; i++) {
-    const s = filtered[i];
-    const lat = Number(s.lat);
-    const lon = Number(s.lon);
-    let candidates = [];
-    for (const key of neighbourKeys(lat, lon)) {
-      const idxs = cells.get(key) || [];
-      for (const j of idxs) {
-        if (j === i) continue;
-        const t = filtered[j];
-        const d = distanceKm([lat, lon], [Number(t.lat), Number(t.lon)]);
-        if (!Number.isFinite(d) || d > maxKm) continue;
-        candidates.push({ idx: j, d });
-      }
-    }
-    candidates.sort((a, b) => a.d - b.d);
-    candidates = candidates.slice(0, maxLinks);
-    for (const c of candidates) {
-      const t = filtered[c.idx];
-      const key = [i, c.idx].sort((a, b) => a - b).join("|");
-      if (pairSeen.has(key)) continue;
-      pairSeen.add(key);
-      links.push({
-        a: i,
-        b: c.idx,
-        coords: [
-          [Number(s.lat), Number(s.lon)],
-          [Number(t.lat), Number(t.lon)]
-        ],
-        distanceKm: c.d
-      });
-    }
-  }
-  return { links, nodes: filtered };
-}
-
-function buildStationLineColors(linkData = { links: [], nodes: [] }) {
-  const nodes = linkData.nodes || [];
-  const links = linkData.links || [];
-  const n = nodes.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (x) => {
-    while (parent[x] !== x) {
-      parent[x] = parent[parent[x]];
-      x = parent[x];
-    }
-    return x;
-  };
-  const union = (a, b) => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent[rb] = ra;
-  };
-  for (const l of links) {
-    if (Number.isFinite(l?.a) && Number.isFinite(l?.b)) {
-      union(l.a, l.b);
-    }
-  }
-  const palette = [
-    "#38bdf8",
-    "#22d3ee",
-    "#34d399",
-    "#f59e0b",
-    "#f97316",
-    "#f43f5e",
-    "#a78bfa",
-    "#60a5fa",
-    "#facc15"
-  ];
-  const colorByRoot = new Map();
-  const pickColor = (root) => {
-    if (!colorByRoot.has(root)) {
-      colorByRoot.set(root, palette[colorByRoot.size % palette.length]);
-    }
-    return colorByRoot.get(root);
-  };
-  return links.map((l) => ({
-    coords: l.coords,
-    color: pickColor(find(l.a))
-  }));
-}
 
 function buildCoordKey(coord, precision = 4) {
   if (!Array.isArray(coord) || coord.length < 2) return "";
@@ -5050,44 +4928,6 @@ function mergeStaticRoadRoutes(rawRoutes = []) {
   })));
 }
 
-function renderOsRoadOverlayViewport() {
-  if (!OS_DERIVED_STATE.roadsData || !OS_DERIVED_STATE.roadsLayer) return;
-  const sig = getOsRenderSignature();
-  if (sig === OS_DERIVED_STATE.roadsRenderSig) return;
-  OS_DERIVED_STATE.roadsRenderSig = sig;
-  const bounds = getExpandedBounds(0.22);
-  const zoom = map.getZoom();
-  const features = (OS_DERIVED_STATE.roadsData.features || []).filter((f) => {
-    const p = f.properties || {};
-    return roadVisibleAtZoom(p, zoom) && featureInBounds(f, bounds);
-  });
-  OS_DERIVED_STATE.roadsLayer.clearLayers();
-  L.geoJSON({ type: "FeatureCollection", features }, {
-    style: (f) => ({
-      color: osRoadColorForFeature(f.properties || {}),
-      weight: zoom <= 8 ? 1.4 : 1.9,
-      opacity: zoom <= 8 ? 0.55 : 0.72,
-      className: "os-road-static-line os-road-line-interactive"
-    }),
-    onEachFeature: (f, l) => {
-      const name = f.properties?.name || "Major Road";
-      const type = f.properties?.highway || "";
-      const coords = f.geometry?.type === "LineString"
-        ? (f.geometry.coordinates || []).map((p) => [Number(p?.[1]), Number(p?.[0])]).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
-        : [];
-      const segKm = routeLengthKm(coords);
-      l.bindPopup(
-        `<strong>${escapeHtml(name)}</strong><br>` +
-        `<span class="popup-label">Type</span> ${escapeHtml(type || "road")}<br>` +
-        `<span class="popup-label">Visible Segment</span> ${segKm.toFixed(2)} km`
-      );
-      if (zoom >= 9) {
-        l.bindTooltip(`${escapeHtml(name)}${type ? ` (${escapeHtml(type)})` : ""}`, { sticky: true, opacity: 0.85 });
-      }
-    }
-  }).addTo(OS_DERIVED_STATE.roadsLayer);
-}
-
 function renderOsRailOverlayViewport() {
   if (!OS_DERIVED_STATE.railData || !OS_DERIVED_STATE.railLayer) return;
   const sig = getOsRenderSignature();
@@ -5126,7 +4966,6 @@ function renderOsRailOverlayViewport() {
   }).addTo(OS_DERIVED_STATE.railLayer);
 }
 
-const scheduleOsRoadViewportRender = debounce(renderOsRoadOverlayViewport, 160);
 const scheduleOsRailViewportRender = debounce(renderOsRailOverlayViewport, 160);
 
 function renderStaticRoadOverlay() {
@@ -5150,13 +4989,19 @@ function renderStaticRoadOverlay() {
 
   const visibleRoutes = routes.filter((r) => {
     const coords = Array.isArray(r?.coords) ? r.coords : [];
-    return coords.length >= 2 && staticRoadVisibleAtZoom(r?.type, zoom) && staticRouteInBounds(coords, bounds);
+    if (!(coords.length >= 2 && staticRoadVisibleAtZoom(r?.type, zoom) && staticRouteInBounds(coords, bounds))) return false;
+    const lineKey = normalizeRoadLineKey(r?.type, r?.name);
+    const totalKm = Number(roadLengthTotals.get(lineKey) || routeLengthKm(coords));
+    return isMajorStaticRoadRoute(r, totalKm, zoom);
   });
   const orderedVisibleRoutes = [...visibleRoutes].sort((a, b) => {
     const keyA = normalizeRoadLineKey(a?.type, a?.name);
     const keyB = normalizeRoadLineKey(b?.type, b?.name);
     const totalA = Number(roadLengthTotals.get(keyA) || 0);
     const totalB = Number(roadLengthTotals.get(keyB) || 0);
+    const priA = staticRoadPriorityScore(a, totalA);
+    const priB = staticRoadPriorityScore(b, totalB);
+    if (priA !== priB) return priA - priB;
     if (totalA !== totalB) return totalA - totalB;
     return routeLengthKm(a?.coords || []) - routeLengthKm(b?.coords || []);
   });
@@ -5165,11 +5010,13 @@ function renderStaticRoadOverlay() {
     const coords = Array.isArray(r?.coords) ? r.coords : [];
     const lineKey = normalizeRoadLineKey(r?.type, r?.name);
     const totalKm = Number(roadLengthTotals.get(lineKey) || routeLengthKm(coords));
-    const baseWeight = zoom <= 8 ? 3.4 : 4.2;
+    const priority = staticRoadPriorityScore(r, totalKm);
+    const priorityBoost = Math.max(0, Math.min(1.6, (priority - 8) * 0.06));
+    const baseWeight = (zoom <= 8 ? 3.0 : 3.7) + priorityBoost;
     const line = L.polyline(coords, {
       color: osRoadColorForFeature({ highway: r.type, name: r.name }),
       weight: baseWeight,
-      opacity: 0.9,
+      opacity: 0.92,
       smoothFactor: 1.8,
       className: "os-road-static-line os-road-line-interactive"
     }).addTo(OS_DERIVED_STATE.roadsLayer);
@@ -5184,15 +5031,17 @@ function renderStaticRoadOverlay() {
     OS_DERIVED_STATE.roadsRenderedSegments.push({ layer: line, lineKey, totalKm, baseWeight });
   }
 
-  const roadConnectors = buildRoadGapConnectors(visibleRoutes, zoom <= 8 ? 0.14 : 0.09);
+  const roadConnectors = buildRoadGapConnectors(visibleRoutes, zoom <= 8 ? 0.38 : 0.24);
   for (const c of roadConnectors) {
     const lineKey = normalizeRoadLineKey(c?.type, c?.name);
     const totalKm = Number(roadLengthTotals.get(lineKey) || routeLengthKm(c?.coords || []));
-    const baseWeight = zoom <= 8 ? 2.7 : 3.1;
+    const priority = staticRoadPriorityScore(c, totalKm);
+    const priorityBoost = Math.max(0, Math.min(1.1, (priority - 8) * 0.045));
+    const baseWeight = (zoom <= 8 ? 2.3 : 2.7) + priorityBoost;
     const connector = L.polyline(c.coords, {
       color: osRoadColorForFeature({ highway: c.type, name: c.name }),
       weight: baseWeight,
-      opacity: 0.86,
+      opacity: 0.88,
       smoothFactor: 1.8,
       className: "os-road-static-line os-road-line-interactive"
     }).addTo(OS_DERIVED_STATE.roadsLayer);
@@ -5226,28 +5075,48 @@ function renderStaticRailOverlay() {
   });
   const lineLengthTotals = buildRailLineLengthTotals(routesForTotals);
 
-  const visibleRoutes = routes.filter((r) => {
+  const visibleCandidates = routes.filter((r) => {
     const coords = Array.isArray(r?.coords) ? r.coords : [];
     return coords.length >= 2 && staticRailVisibleAtZoom(r?.type, zoom) && staticRouteInBounds(coords, bounds);
   });
-  const orderedVisibleRoutes = [...visibleRoutes].sort((a, b) => {
+  const prioritizedVisible = [...visibleCandidates].sort((a, b) => {
     const keyA = normalizeRailLineKey(a?.type, a?.name);
     const keyB = normalizeRailLineKey(b?.type, b?.name);
     const totalA = Number(lineLengthTotals.get(keyA) || 0);
     const totalB = Number(lineLengthTotals.get(keyB) || 0);
-    if (totalA !== totalB) return totalA - totalB;
-    return routeLengthKm(a?.coords || []) - routeLengthKm(b?.coords || []);
+    const priA = staticRailPriorityScore(a, totalA);
+    const priB = staticRailPriorityScore(b, totalB);
+    if (priA !== priB) return priB - priA;
+    if (totalA !== totalB) return totalB - totalA;
+    return routeLengthKm(b?.coords || []) - routeLengthKm(a?.coords || []);
   });
+  const visibleRoutes = prioritizedVisible
+    .filter((r) => {
+      const key = normalizeRailLineKey(r?.type, r?.name);
+      const totalKm = Number(lineLengthTotals.get(key) || routeLengthKm(r?.coords || []));
+      // Keep a trunk-network view at lower zoom, similar to TfL-style line clarity.
+      if (zoom <= 7) return isMajorStaticRailRoute(r, totalKm, zoom);
+      if (zoom <= 9) return staticRailPriorityScore(r, totalKm) >= 8 || isMajorStaticRailRoute(r, totalKm, zoom);
+      return true;
+    })
+    .slice(0, railDisplayRouteLimitForZoom(zoom));
 
-  for (const r of orderedVisibleRoutes) {
-    const coords = Array.isArray(r?.coords) ? r.coords : [];
+  const useSpineMode = zoom <= 10;
+  const displayRoutes = useSpineMode ? buildRailSpineDisplayRoutes(visibleRoutes, zoom) : visibleRoutes;
+
+  for (const r of displayRoutes) {
+    const rawCoords = Array.isArray(r?.coords) ? r.coords : [];
+    const coords = simplifyRailRouteForDisplay(rawCoords, zoom);
+    if (!Array.isArray(coords) || coords.length < 2) continue;
     const lineKey = normalizeRailLineKey(r?.type, r?.name);
-    const totalKm = Number(lineLengthTotals.get(lineKey) || routeLengthKm(coords));
-    const baseWeight = zoom <= 8 ? 3.2 : 4.0;
+    const totalKm = Number(lineLengthTotals.get(lineKey) || routeLengthKm(rawCoords));
+    const priority = staticRailPriorityScore(r, totalKm);
+    const priorityBoost = Math.max(0, Math.min(1.8, (priority - 8) * 0.07));
+    const baseWeight = (zoom <= 8 ? 3.0 : 3.8) + priorityBoost;
     const line = L.polyline(coords, {
       color: osRailColorForFeature({ railway: r.type, name: r.name }),
       weight: baseWeight,
-      opacity: 0.9,
+      opacity: 0.93,
       smoothFactor: 1.8,
       className: "os-rail-static-line os-rail-line-interactive"
     }).addTo(OS_DERIVED_STATE.railLayer);
@@ -5256,30 +5125,37 @@ function renderStaticRailOverlay() {
       if (lineKey) OS_DERIVED_STATE.railSelectedLineKey = lineKey;
       applyOsRailSelectionStyles();
     });
-    if (r.name && zoom >= 9) {
-      line.bindTooltip(`${escapeHtml(r.name)}${r.type ? ` (${escapeHtml(r.type)})` : ""}`, { sticky: true, opacity: 0.9 });
+    const tipName = r.displayName || r.name;
+    if (tipName && zoom >= 9) {
+      line.bindTooltip(`${escapeHtml(tipName)}${r.type ? ` (${escapeHtml(r.type)})` : ""}`, { sticky: true, opacity: 0.9 });
     }
     OS_DERIVED_STATE.railRenderedSegments.push({ layer: line, lineKey, totalKm, baseWeight });
   }
 
-  const railGapConnectors = buildRailGapConnectors(visibleRoutes, zoom <= 8 ? 0.16 : 0.1);
-  for (const c of railGapConnectors) {
-    const lineKey = normalizeRailLineKey(c?.type, c?.name);
-    const totalKm = Number(lineLengthTotals.get(lineKey) || routeLengthKm(c?.coords || []));
-    const baseWeight = zoom <= 8 ? 2.4 : 2.8;
-    const connector = L.polyline(c.coords, {
-      color: osRailColorForFeature({ railway: c.type, name: c.name }),
-      weight: baseWeight,
-      opacity: 0.9,
-      smoothFactor: 1.6,
-      className: "os-rail-static-line os-rail-line-interactive"
-    }).addTo(OS_DERIVED_STATE.railLayer);
-    connector.bindPopup(buildOsRailLinePopupHtml(c, lineKey, totalKm));
-    connector.on("click", () => {
-      if (lineKey) OS_DERIVED_STATE.railSelectedLineKey = lineKey;
-      applyOsRailSelectionStyles();
-    });
-    OS_DERIVED_STATE.railRenderedSegments.push({ layer: connector, lineKey, totalKm, baseWeight });
+  if (!useSpineMode) {
+    // Larger join radius prevents obvious breaks where adjacent segments are not perfectly snapped.
+    const connectorSource = visibleRoutes.length > 520 ? visibleRoutes.slice(0, 520) : visibleRoutes;
+    const railGapConnectors = buildRailGapConnectors(connectorSource, zoom <= 8 ? 0.55 : 0.35);
+    for (const c of railGapConnectors) {
+      const lineKey = normalizeRailLineKey(c?.type, c?.name);
+      const totalKm = Number(lineLengthTotals.get(lineKey) || routeLengthKm(c?.coords || []));
+      const priority = staticRailPriorityScore(c, totalKm);
+      const priorityBoost = Math.max(0, Math.min(1.2, (priority - 8) * 0.05));
+      const baseWeight = (zoom <= 8 ? 2.5 : 2.9) + priorityBoost;
+      const connector = L.polyline(c.coords, {
+        color: osRailColorForFeature({ railway: c.type, name: c.name }),
+        weight: baseWeight,
+        opacity: 0.9,
+        smoothFactor: 1.6,
+        className: "os-rail-static-line os-rail-line-interactive"
+      }).addTo(OS_DERIVED_STATE.railLayer);
+      connector.bindPopup(buildOsRailLinePopupHtml(c, lineKey, totalKm));
+      connector.on("click", () => {
+        if (lineKey) OS_DERIVED_STATE.railSelectedLineKey = lineKey;
+        applyOsRailSelectionStyles();
+      });
+      OS_DERIVED_STATE.railRenderedSegments.push({ layer: connector, lineKey, totalKm, baseWeight });
+    }
   }
   applyOsRailSelectionStyles();
 
@@ -5311,12 +5187,13 @@ async function loadOsRoadOverlay() {
     return;
   }
   try {
-    const staticPicked = await fetchJsonFromCandidates([
-      "data/transport_static/roads_core.json"
-    ]);
-    if (staticPicked && Array.isArray(staticPicked.data?.routes)) {
-      OS_DERIVED_STATE.roadsData = staticPicked.data;
-      OS_DERIVED_STATE.roadsMergedRoutes = mergeStaticRoadRoutes(staticPicked.data.routes || []);
+    const staticPicked = await fetchJsonFromCandidates(["data/transport_static/roads_core.json"]);
+    const staticRoadPayload = (staticPicked && typeof staticPicked.data === "object" && staticPicked.data)
+      ? staticPicked.data
+      : staticPicked;
+    if (staticRoadPayload && Array.isArray(staticRoadPayload.routes) && staticRoadPayload.routes.length) {
+      OS_DERIVED_STATE.roadsData = staticRoadPayload;
+      OS_DERIVED_STATE.roadsMergedRoutes = mergeStaticRoadRoutes(staticRoadPayload.routes || []);
       OS_DERIVED_STATE.roadsLayer = L.featureGroup().addTo(layers.os_roads);
       OS_DERIVED_STATE.roadsLoaded = true;
       OS_DERIVED_STATE.roadsStatic = true;
@@ -5326,25 +5203,11 @@ async function loadOsRoadOverlay() {
       setStatus("OS roads overlay loaded (static core).");
       return;
     }
-
-    const picked = await fetchGeoJsonFromCandidates([
-      "data/osm_derived/gb_major_roads_lite.geojson",
-      "data/osm_derived/gb_major_roads.geojson"
-    ]);
-    if (!picked) throw new Error("No OS road dataset found");
-    OS_DERIVED_STATE.roadsData = picked.data;
-    OS_DERIVED_STATE.roadsMergedRoutes = null;
-    OS_DERIVED_STATE.roadsLayer = L.featureGroup().addTo(layers.os_roads);
-    OS_DERIVED_STATE.roadsLoaded = true;
-    OS_DERIVED_STATE.roadsStatic = false;
-    OS_DERIVED_STATE.roadsStaticRenderSig = "";
-    OS_DERIVED_STATE.roadsRenderSig = "";
-    renderOsRoadOverlayViewport();
-    setStatus(`OS roads overlay loaded (${picked.path.includes("_lite") ? "lite" : "full"}).`);
+    throw new Error("Missing data/transport_static/roads_core.json routes payload");
   } catch (err) {
     OS_DERIVED_STATE.roadsFailed = true;
     console.warn("OS major roads overlay unavailable:", err);
-    markOsDerivedLayerUnavailable("os_roads", "OS roads overlay data is not available.");
+    markOsDerivedLayerUnavailable("os_roads", "Static roads core data is not available.");
     notifyOsDerivedUnavailableOnce("OS-derived overlays unavailable in this build.");
   }
 }
@@ -5352,49 +5215,40 @@ async function loadOsRoadOverlay() {
 async function loadOsRailOverlay() {
   if (OS_DERIVED_STATE.railLoaded || OS_DERIVED_STATE.railFailed) return;
   if (map.getZoom() < 6) {
-    setStatus("Zoom in to level 6+ to load OS rail overlay.");
+    setStatus("Zoom in to level 6+ to load UK rail network overlay.");
     return;
   }
   try {
-    const staticRail = await fetchJsonFromCandidates([
-      "data/transport_static/rail_core.json"
-    ]);
-    if (staticRail && Array.isArray(staticRail.data?.routes)) {
-      const staticStations = await fetchJsonFromCandidates([
-        "data/transport_static/rail_stations_core.json"
-      ]);
-      OS_DERIVED_STATE.railData = staticRail.data;
-      OS_DERIVED_STATE.railMergedRoutes = mergeStaticRailRoutes(staticRail.data.routes || []);
-      OS_DERIVED_STATE.railStationData = staticStations?.data || { stations: [] };
+    // Always prefer compact static core to avoid browser crashes on huge rail GeoJSON.
+    const staticRail = await fetchJsonFromCandidates(["data/transport_static/rail_core.json"]);
+    const staticRailPayload = (staticRail && typeof staticRail.data === "object" && staticRail.data)
+      ? staticRail.data
+      : staticRail;
+    if (staticRailPayload && Array.isArray(staticRailPayload.routes) && staticRailPayload.routes.length) {
+      const staticStations = await fetchJsonFromCandidates(["data/transport_static/rail_stations_core.json"]);
+      const staticStationPayload = (staticStations && typeof staticStations.data === "object" && staticStations.data)
+        ? staticStations.data
+        : staticStations;
+      OS_DERIVED_STATE.railData = staticRailPayload;
+      OS_DERIVED_STATE.railMergedRoutes = mergeStaticRailRoutes(staticRailPayload.routes || []);
+      OS_DERIVED_STATE.railStationData = (staticStationPayload && Array.isArray(staticStationPayload.stations))
+        ? staticStationPayload
+        : { stations: [] };
       OS_DERIVED_STATE.railLayer = L.featureGroup().addTo(layers.os_rail);
       OS_DERIVED_STATE.railLoaded = true;
       OS_DERIVED_STATE.railStatic = true;
       OS_DERIVED_STATE.railStaticRenderSig = "";
       renderStaticRailOverlay();
       markLayerAsStaticMode("os_rail");
-      setStatus("OS rail overlay loaded (static core).");
+      setStatus("UK rail network loaded (static core).");
       return;
     }
-
-    const picked = await fetchGeoJsonFromCandidates([
-      "data/osm_derived/gb_rail_lines_lite.geojson",
-      "data/osm_derived/gb_rail_lines.geojson"
-    ]);
-    if (!picked) throw new Error("No OS rail dataset found");
-    OS_DERIVED_STATE.railData = picked.data;
-    OS_DERIVED_STATE.railMergedRoutes = null;
-    OS_DERIVED_STATE.railLayer = L.featureGroup().addTo(layers.os_rail);
-    OS_DERIVED_STATE.railLoaded = true;
-    OS_DERIVED_STATE.railStatic = false;
-    OS_DERIVED_STATE.railStaticRenderSig = "";
-    OS_DERIVED_STATE.railRenderSig = "";
-    renderOsRailOverlayViewport();
-    setStatus(`OS rail overlay loaded (${picked.path.includes("_lite") ? "lite" : "full"}).`);
+    throw new Error("Missing data/transport_static/rail_core.json routes payload");
   } catch (err) {
     OS_DERIVED_STATE.railFailed = true;
-    console.warn("OS rail overlay unavailable:", err);
-    markOsDerivedLayerUnavailable("os_rail", "OS rail overlay data is not available.");
-    notifyOsDerivedUnavailableOnce("OS-derived overlays unavailable in this build.");
+    console.warn("UK rail network overlay unavailable:", err);
+    markOsDerivedLayerUnavailable("os_rail", "Static UK rail network data is not available.");
+    setStatus("UK rail network data unavailable");
   }
 }
 
@@ -5655,7 +5509,7 @@ async function ensureUndergroundLoaded() {
     return true;
   }).catch((e) => {
     console.warn("TfL underground data unavailable:", e?.message || e);
-    markOsDerivedLayerUnavailable("underground", "Underground dataset unavailable.");
+    setStatus("TfL underground dataset unavailable");
     return false;
   }).finally(() => {
     OVERLAY_LOAD_STATE.undergroundLoading = null;
@@ -5700,69 +5554,7 @@ function renderResults(container, rows, isPartial) {
 }
 
 // â”€â”€ PSC Results list â”€â”€
-function renderPscResults(container, results, mode) {
-  container.innerHTML = "";
-  if (!results.length) {
-    container.innerHTML = '<div class="ch-result-count">No matches found</div>';
-    return;
-  }
 
-  if (mode === "person") {
-    // Group by person name, show their companies
-    const el = document.createElement("div");
-    el.className = "ch-result-count";
-    el.textContent = `${results.length} match${results.length === 1 ? "" : "es"}`;
-    container.appendChild(el);
-
-    // Group results by name (exact match)
-    const byName = {};
-    for (const r of results) {
-      const key = r.n;
-      if (!byName[key]) byName[key] = [];
-      byName[key].push(r.c);
-    }
-
-    let shown = 0;
-    for (const [name, companies] of Object.entries(byName)) {
-      if (shown >= MAX_VISIBLE) break;
-      const item = document.createElement("div");
-      item.className = "ch-result-item psc-person-item";
-      const coList = companies.slice(0, 5).map(c => `#${escapeHtml(c)}`).join(", ");
-      const extra = companies.length > 5 ? ` +${companies.length - 5} more` : "";
-      item.innerHTML =
-        `<div class="ch-r-name psc-person-name">${escapeHtml(name)}</div>` +
-        `<div class="ch-r-detail">${escapeHtml(companies.length + " compan" + (companies.length === 1 ? "y" : "ies"))}: ${coList}${extra}</div>`;
-      item.addEventListener("click", () => lookupAndPlotCompanies(companies));
-      container.appendChild(item);
-      shown++;
-    }
-  } else if (mode === "company_psc") {
-    // Show PSC records for a company
-    const el = document.createElement("div");
-    el.className = "ch-result-count";
-    el.textContent = `${results.length} PSC record${results.length === 1 ? "" : "s"}`;
-    container.appendChild(el);
-
-    for (const r of results) {
-      const item = document.createElement("div");
-      item.className = "ch-result-item psc-record-item";
-      const kind = r.k === "I" ? "Individual" : "Corporate";
-      const natures = (r.t || []).join(", ");
-      const dob = r.b ? ` &middot; DOB: ${escapeHtml(r.b)}` : "";
-      item.innerHTML =
-        `<div class="ch-r-name">${escapeHtml(r.n)}</div>` +
-        `<div class="ch-r-detail"><span class="popup-tag psc-tag-${r.k === "I" ? "individual" : "corporate"}">${kind}</span> &middot; Co: #${escapeHtml(r.c)}${dob}</div>` +
-        (natures ? `<div class="ch-r-detail psc-natures">${escapeHtml(natures)}</div>` : "");
-      // Click person to search for them across all companies
-      item.addEventListener("click", () => {
-        document.getElementById("psc_name").value = r.n;
-        document.getElementById("psc_company").value = "";
-        runPscSearch();
-      });
-      container.appendChild(item);
-    }
-  }
-}
 
 // Look up companies by number and plot them
 async function lookupAndPlotCompanies(companyNumbers) {
@@ -6167,8 +5959,7 @@ async function addPersonToMap(officerName, address, companies = [], options = {}
 
 map.on("moveend zoomend", () => {
   if (map.hasLayer(layers.os_roads) && OS_DERIVED_STATE.roadsLoaded) {
-    if (OS_DERIVED_STATE.roadsStatic) renderStaticRoadOverlay();
-    else scheduleOsRoadViewportRender();
+    renderStaticRoadOverlay();
   }
   if (map.hasLayer(layers.os_rail) && OS_DERIVED_STATE.railLoaded) {
     if (OS_DERIVED_STATE.railStatic) renderStaticRailOverlay();
@@ -6691,12 +6482,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       editingEntity.latLng = placementLatLng;
 
       editingEntity.marker.setLatLng(placementLatLng);
-      editingEntity.marker.setIcon(L.icon({
-        iconUrl: iconData.icon,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
-        popupAnchor: [0, -16]
-      }));
+      editingEntity.marker.setIcon(createEntityMarkerIcon(iconData, i2EntityData));
       editingEntity.marker.setPopupContent(buildEntityPopup(editingEntityId, editingEntity));
       bindEntityHoverTooltip(editingEntity.marker, editingEntity);
       refreshConnectionsForEntity(editingEntityId);
@@ -6828,6 +6614,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const cpMenuBtn = document.getElementById("cp-menu-btn");
   const cpMenu = document.getElementById("cp-menu");
   const controlPanel = document.getElementById("control-panel");
+  const controlPanelHeader = controlPanel?.querySelector(".cp-header");
+  const entityPanel = document.getElementById("entity-placement-panel");
   const mobilePanelToggle = document.getElementById("mobile-panel-toggle");
   const mobileViewport = window.matchMedia("(max-width: 920px)");
   let mobilePanelHidden = false;
@@ -6871,6 +6659,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   mobileViewport.addEventListener("change", syncMobileViewportLayout);
   syncMobileViewportLayout();
+  makePanelDraggable(controlPanel, controlPanelHeader);
+  makePanelDraggable(entityPanel, document.querySelector(".entity-panel-header"));
 
   map.on("click", () => {
     if (!mobileViewport.matches || mobilePanelHidden) return;
@@ -6976,7 +6766,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (cb.checked && cb.dataset.layer === "os_rail") {
         if (map.getZoom() < 6) {
           cb.checked = false;
-          setStatus("Zoom in to level 6+ before enabling OS rail.");
+          setStatus("Zoom in to level 6+ before enabling UK rail network.");
           return;
         }
         await loadOsRailOverlay();

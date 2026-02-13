@@ -4,13 +4,27 @@
   <meta charset="utf-8" />
   <title>Control Room</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <script>
+    (function routeMapEngine() {
+      try {
+        const qs = new URLSearchParams(window.location.search);
+        const mode = String(qs.get("map") || "").toLowerCase();
+        if (mode !== "maplibre") return;
+        qs.delete("map");
+        const suffix = qs.toString();
+        const target = "index_maplibre_preview.html" + (suffix ? ("?" + suffix) : "");
+        window.location.replace(target);
+      } catch (_) {
+        // keep default app path on parser errors
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-
   <div id="control-panel">
     <div class="cp-header">
       <span class="cp-title">CONTROL ROOM</span>
@@ -314,7 +328,7 @@
           <input type="checkbox" class="layer-cb" data-layer="flights">
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="layer-dot" style="background:#f59e0b"></span>
-          <span class="layer-name">Live Flights (OpenSky)</span>
+          <span class="layer-name">Live Flights (FlightRadar24)</span>
         </label>
 
         <details class="panel-disclosure layer-tool-block" data-layer-tools="flights">
@@ -391,7 +405,7 @@
           <input type="checkbox" class="layer-cb" data-layer="os_rail">
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="layer-dot" style="background:#60a5fa"></span>
-          <span class="layer-name">OS Rail Lines</span>
+          <span class="layer-name">UK Rail Network (static)</span>
         </label>
 
         <details class="panel-disclosure layer-tool-block" data-layer-tools="underground">
@@ -586,12 +600,11 @@
   <script src="js/tfl_live.js"></script>
   <script src="js/national_rail.js"></script>
   <script src="js/roads_live.js"></script>
-  <script src="js/opensky.js"></script>
+  <script src="js/flights.js"></script>
   <script src="js/dvla.js"></script>
   <script src="js/system_health.js"></script>
   <script src="js/i2_workspace.js"></script>
 
 </body>
 </html>
-
 
