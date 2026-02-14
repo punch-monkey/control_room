@@ -91,51 +91,22 @@
 
 <body>
     <div class="preview-controls">
-        <div class="preview-title">MapLibre Rail Overlay</div>
-        <div class="preview-row">
-            <input id="rail-vector-toggle" type="checkbox" checked />
-            <label for="rail-vector-toggle">Rail (OpenRailwayMap Vector Tiles)</label>
-        </div>
-        <div id="rail-status" class="preview-status">Loading rail vector overlay...</div>
+        <div class="preview-title">UK Rail Vector View</div>
+        <div id="rail-status" class="preview-status">Loading single-source rail map...</div>
         <div class="preview-note">
-            Source: OpenRailwayMap-vector. Display constrained to the UK.
+            Source: OpenRailwayMap standard style (single provider). Display constrained to UK bounds.
         </div>
     </div>
     <div id="map"></div>
 
     <script>
     const ormConfig = {
-        baseStyle: "http://localhost:8080/styles/basic-preview/style.json",
-        fallbackBaseStyle: "https://demotiles.maplibre.org/style.json",
-        sourceBase: "https://openrailwaymap.app",
-        lowSourcePath: "/standard_railway_line_low",
-        highSourcePath: "/railway_line_high"
+        styleUrl: "https://openrailwaymap.app/style/standard.json"
     };
     const ukBounds = [
         [-11.5, 49.5],
         [2.8, 61.2]
     ];
-    const ukRailFilterPolygon = {
-        type: "Polygon",
-        coordinates: [[
-            [-11.5, 49.5],
-            [2.8, 49.5],
-            [2.8, 61.2],
-            [-11.5, 61.2],
-            [-11.5, 49.5]
-        ]]
-    };
-
-    const railLayerIds = {
-        low: "cr-orm-rail-low",
-        high: "cr-orm-rail-high"
-    };
-
-    const railSourceIds = {
-        low: "cr-orm-rail-low-src",
-        high: "cr-orm-rail-high-src"
-    };
-
     const searchParams = new URLSearchParams(window.location.search);
     const requestedLng = Number(searchParams.get("lng"));
     const requestedLat = Number(searchParams.get("lat"));
@@ -146,8 +117,6 @@
         Number.isFinite(requestedZoom);
     const startCenter = hasRequestedView ? [requestedLng, requestedLat] : [-2.5879, 51.4545];
     const startZoom = hasRequestedView ? Math.max(5, Math.min(13, requestedZoom)) : 6;
-
-    let railOverlayHealthy = true;
 
     function setRailStatus(message, kind = "info") {
         const el = document.getElementById("rail-status");
@@ -165,133 +134,12 @@
         }
     }
 
-    function railVisibilityMode(enabled) {
-        return enabled ? "visible" : "none";
-    }
-
-    function setRailOverlayVisible(enabled) {
-        if (!map) return;
-        for (const id of Object.values(railLayerIds)) {
-            if (!map.getLayer(id)) continue;
-            map.setLayoutProperty(id, "visibility", railVisibilityMode(enabled && railOverlayHealthy));
-        }
-        if (!railOverlayHealthy) {
-            setRailStatus("Rail vector source unavailable. Overlay disabled.", "error");
-        } else if (enabled) {
-            setRailStatus("Rail vector overlay active.", "ok");
-        } else {
-            setRailStatus("Rail vector overlay hidden.", "info");
-        }
-    }
-
-    async function pingRailSource() {
-        const url = `${ormConfig.sourceBase}${ormConfig.highSourcePath}`;
-        try {
-            const resp = await fetch(url, { method: "GET" });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            return true;
-        } catch (_) {
-            return false;
-        }
-    }
-
-    async function canReachStyle(url, timeoutMs = 1500) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const resp = await fetch(url, { method: "GET", cache: "no-store", signal: controller.signal });
-            clearTimeout(timer);
-            return !!resp.ok;
-        } catch (_) {
-            return false;
-        }
-    }
-
-    async function resolveBaseStyle() {
-        const localOk = await canReachStyle(ormConfig.baseStyle);
-        if (localOk) return ormConfig.baseStyle;
-        setRailStatus("Local vector base style unavailable. Using fallback style.", "info");
-        return ormConfig.fallbackBaseStyle;
-    }
-
-    async function addRailOverlay() {
-        const sourceReachable = await pingRailSource();
-        if (!sourceReachable) {
-            railOverlayHealthy = false;
-            setRailStatus("Rail vector endpoint did not respond. Base map only.", "error");
-            return;
-        }
-
-        map.addSource(railSourceIds.low, {
-            type: "vector",
-            url: `${ormConfig.sourceBase}${ormConfig.lowSourcePath}`
-        });
-
-        map.addSource(railSourceIds.high, {
-            type: "vector",
-            url: `${ormConfig.sourceBase}${ormConfig.highSourcePath}`
-        });
-
-        map.addLayer({
-            id: railLayerIds.low,
-            type: "line",
-            source: railSourceIds.low,
-            "source-layer": "standard_railway_line_low",
-            minzoom: 0,
-            maxzoom: 9,
-            filter: ["within", ukRailFilterPolygon],
-            paint: {
-                "line-color": "#60a5fa",
-                "line-opacity": 0.86,
-                "line-width": [
-                    "interpolate", ["linear"], ["zoom"],
-                    3, 1.0,
-                    6, 1.7,
-                    9, 2.4
-                ]
-            }
-        });
-
-        map.addLayer({
-            id: railLayerIds.high,
-            type: "line",
-            source: railSourceIds.high,
-            "source-layer": "railway_line_high",
-            minzoom: 7,
-            filter: ["within", ukRailFilterPolygon],
-            paint: {
-                "line-color": [
-                    "match",
-                    ["get", "railway"],
-                    "rail", "#38bdf8",
-                    "light_rail", "#22d3ee",
-                    "subway", "#0ea5e9",
-                    "tram", "#67e8f9",
-                    "#60a5fa"
-                ],
-                "line-opacity": 0.92,
-                "line-width": [
-                    "interpolate", ["linear"], ["zoom"],
-                    7, 1.2,
-                    10, 2.0,
-                    13, 3.0,
-                    16, 4.2
-                ]
-            }
-        });
-
-        railOverlayHealthy = true;
-        setRailStatus("Rail vector overlay loaded and ready.", "ok");
-        setRailOverlayVisible(document.getElementById("rail-vector-toggle")?.checked !== false);
-    }
-
     let map = null;
 
     (async function initMap() {
-        const resolvedStyle = await resolveBaseStyle();
         map = new maplibregl.Map({
             container: "map",
-            style: resolvedStyle,
+            style: ormConfig.styleUrl,
             center: startCenter,
             zoom: startZoom,
             minZoom: 5,
@@ -305,22 +153,15 @@
             customAttribution: '<a href="https://github.com/hiddewie/OpenRailwayMap-vector" target="_blank" rel="noopener noreferrer">OpenRailwayMap-vector</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>'
         }));
 
-        map.on("load", async () => {
+        map.on("load", () => {
             if (!hasRequestedView) {
                 map.fitBounds(ukBounds, { padding: 28, duration: 0 });
             }
-            await addRailOverlay();
+            setRailStatus("Rail map loaded from single source.", "ok");
         });
 
-        map.on("error", (ev) => {
-            const sourceId = String(ev?.error?.sourceId || "");
-            if (!sourceId.includes("cr-orm-rail")) return;
-            railOverlayHealthy = false;
-            setRailOverlayVisible(false);
-        });
-
-        document.getElementById("rail-vector-toggle")?.addEventListener("change", (e) => {
-            setRailOverlayVisible(!!e.target.checked);
+        map.on("error", () => {
+            setRailStatus("Rail map source unavailable.", "error");
         });
     })();
     </script>
