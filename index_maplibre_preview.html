@@ -86,6 +86,67 @@
             color: #93c5fd;
             line-height: 1.4;
         }
+        .ops-block {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(148, 163, 184, 0.22);
+        }
+        .ops-label {
+            display: block;
+            font-size: 11px;
+            margin-bottom: 4px;
+            color: #bfdbfe;
+        }
+        .ops-input, .ops-select {
+            width: 100%;
+            box-sizing: border-box;
+            background: rgba(15, 23, 42, 0.72);
+            color: #e2e8f0;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            border-radius: 6px;
+            padding: 7px 8px;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .ops-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+        .ops-btn {
+            background: #1d4ed8;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .ops-btn.alt {
+            background: #334155;
+        }
+        .ops-results {
+            max-height: 220px;
+            overflow: auto;
+            font-size: 11px;
+            line-height: 1.4;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 7px;
+            padding: 7px 8px;
+            color: #dbeafe;
+        }
+        .ops-empty {
+            opacity: 0.84;
+        }
+        .ops-service {
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+        }
+        .ops-service:last-child {
+            border-bottom: none;
+        }
     </style>
 </head>
 
@@ -95,6 +156,21 @@
         <div id="rail-status" class="preview-status">Loading single-source rail map...</div>
         <div class="preview-note">
             Source: OpenRailwayMap standard style (single provider). Display constrained to UK bounds.
+        </div>
+        <div class="ops-block">
+            <label for="nr-crs-inline" class="ops-label">Station (CRS)</label>
+            <input id="nr-crs-inline" class="ops-input" type="text" list="nr-crs-inline-list" placeholder="e.g. KGX or Kings Cross" />
+            <datalist id="nr-crs-inline-list"></datalist>
+            <select id="nr-board-type-inline" class="ops-select">
+                <option value="departures">Departures</option>
+                <option value="arrivals">Arrivals</option>
+            </select>
+            <div class="ops-actions">
+                <button id="nr-fetch-inline" class="ops-btn" type="button">Fetch Board</button>
+                <button id="nr-disrupt-inline" class="ops-btn alt" type="button">Disruptions</button>
+                <button id="nr-clear-inline" class="ops-btn alt" type="button">Clear</button>
+            </div>
+            <div id="nr-inline-results" class="ops-results"><div class="ops-empty">Rail ops ready.</div></div>
         </div>
     </div>
     <div id="map"></div>
@@ -135,6 +211,171 @@
     }
 
     let map = null;
+    let stationMarker = null;
+    let stationSuggestTimer = null;
+    const stationLookupByKey = new Map();
+
+    function escapeHtml(raw) {
+        return String(raw || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function parseCrs(raw) {
+        const text = String(raw || "").trim().toUpperCase();
+        if (/^[A-Z]{3}$/.test(text)) return text;
+        const m = text.match(/\b([A-Z]{3})\b/);
+        return m ? m[1] : "";
+    }
+
+    async function fetchJson(path) {
+        const r = await fetch(path, { headers: { Accept: "application/json" } });
+        if (!r.ok) {
+            let detail = "";
+            try { detail = await r.text(); } catch (_) {}
+            throw new Error(`HTTP ${r.status}${detail ? ` ${String(detail).slice(0, 160)}` : ""}`);
+        }
+        return r.json();
+    }
+
+    async function fetchStationSuggestions(q) {
+        const params = new URLSearchParams({ q: String(q || ""), limit: "20" });
+        const payload = await fetchJson(`/nre/stations?${params.toString()}`);
+        return Array.isArray(payload?.stations) ? payload.stations : [];
+    }
+
+    function renderStationDatalist(rows) {
+        const list = document.getElementById("nr-crs-inline-list");
+        if (!list) return;
+        stationLookupByKey.clear();
+        const items = Array.isArray(rows) ? rows : [];
+        list.innerHTML = items.slice(0, 40).map((st) => {
+            const crs = String(st?.crsCode || st?.crs || "").toUpperCase();
+            const name = String(st?.stationName || st?.name || "");
+            const key = `${crs} - ${name}`;
+            stationLookupByKey.set(key.toUpperCase(), { crs, name, lat: st?.lat, lon: st?.lon });
+            return `<option value="${escapeHtml(key)}"></option>`;
+        }).join("");
+    }
+
+    function setOpsHtml(html) {
+        const wrap = document.getElementById("nr-inline-results");
+        if (wrap) wrap.innerHTML = html;
+    }
+
+    function normalizeBoard(raw, crsFallback = "") {
+        const safe = (raw && typeof raw === "object") ? raw : {};
+        const services = Array.isArray(safe.trainServices) ? safe.trainServices : [];
+        return {
+            locationName: String(safe.locationName || ""),
+            crs: String(safe.crs || crsFallback || ""),
+            generatedAt: String(safe.generatedAt || ""),
+            services: services.map((svc) => ({
+                std: String(svc?.std || ""),
+                etd: String(svc?.etd || ""),
+                sta: String(svc?.sta || ""),
+                eta: String(svc?.eta || ""),
+                platform: String(svc?.platform || ""),
+                operator: String(svc?.operator || ""),
+                destination: Array.isArray(svc?.destination) ? svc.destination.map((x) => String(x?.locationName || "")).filter(Boolean) : [],
+                origin: Array.isArray(svc?.origin) ? svc.origin.map((x) => String(x?.locationName || "")).filter(Boolean) : []
+            }))
+        };
+    }
+
+    async function focusStationOnMap(crs, fallbackName = "") {
+        try {
+            const rows = await fetchStationSuggestions(crs);
+            const exact = rows.find((r) => String(r?.crsCode || r?.crs || "").toUpperCase() === String(crs || "").toUpperCase()) || rows[0];
+            const lat = Number(exact?.lat);
+            const lon = Number(exact?.lon || exact?.long);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon) || !map) return;
+            map.flyTo({ center: [lon, lat], zoom: Math.max(9, map.getZoom()), speed: 0.9 });
+            if (stationMarker) stationMarker.remove();
+            stationMarker = new maplibregl.Marker({ color: "#22d3ee" })
+                .setLngLat([lon, lat])
+                .setPopup(new maplibregl.Popup({ offset: 18 }).setHTML(`<strong>${escapeHtml(fallbackName || exact?.stationName || crs)}</strong><br>${escapeHtml(crs)}`))
+                .addTo(map);
+        } catch (_) {
+            // silent
+        }
+    }
+
+    async function runBoardFetch() {
+        const input = document.getElementById("nr-crs-inline");
+        const typeSel = document.getElementById("nr-board-type-inline");
+        const crs = parseCrs(input?.value || "");
+        if (!/^[A-Z]{3}$/.test(crs)) {
+            setOpsHtml('<div class="ops-empty">Use a 3-letter CRS code (e.g. KGX).</div>');
+            return;
+        }
+        try {
+            const params = new URLSearchParams({
+                crs,
+                type: String(typeSel?.value || "departures"),
+                rows: "12"
+            });
+            const raw = await fetchJson(`/raildata/live-board?${params.toString()}`);
+            const board = normalizeBoard(raw, crs);
+            const ts = board.generatedAt ? new Date(board.generatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--:--";
+            const services = board.services || [];
+            let html = `<div><strong>${escapeHtml(board.locationName || crs)} (${escapeHtml(board.crs || crs)})</strong><br>Updated ${escapeHtml(ts)} | ${services.length} services</div>`;
+            if (!services.length) {
+                html += '<div class="ops-empty" style="margin-top:6px;">No live services returned.</div>';
+            } else {
+                html += services.slice(0, 20).map((svc) => {
+                    const when = String(typeSel?.value || "departures") === "arrivals"
+                        ? (svc.eta || svc.sta || "--")
+                        : (svc.etd || svc.std || "--");
+                    const endpoint = String(typeSel?.value || "departures") === "arrivals"
+                        ? ((svc.origin && svc.origin[0]) || "Origin")
+                        : ((svc.destination && svc.destination[0]) || "Destination");
+                    return `<div class="ops-service"><strong>${escapeHtml(endpoint)}</strong><br>${escapeHtml(when)} | Plat ${escapeHtml(svc.platform || "--")} | ${escapeHtml(svc.operator || "")}</div>`;
+                }).join("");
+            }
+            setOpsHtml(html);
+            await focusStationOnMap(crs, board.locationName || crs);
+        } catch (err) {
+            setOpsHtml(`<div class="ops-empty">Live board failed: ${escapeHtml(err?.message || err)}</div>`);
+        }
+    }
+
+    function pickDisruptionRows(payload) {
+        const root = (payload && typeof payload === "object") ? payload : {};
+        const candidates = [
+            root.incidents, root.disruptions, root.messages, root.items,
+            root.data?.incidents, root.data?.disruptions, root.result?.incidents
+        ];
+        const arr = candidates.find((v) => Array.isArray(v));
+        return Array.isArray(arr) ? arr : [];
+    }
+
+    function disruptionText(item) {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return "";
+        return String(item.summary || item.title || item.description || item.message || item.reason || "").trim();
+    }
+
+    async function runDisruptionsFetch() {
+        try {
+            const payload = await fetchJson("/raildata/disruptions");
+            const rows = pickDisruptionRows(payload);
+            if (!rows.length) {
+                setOpsHtml('<div class="ops-empty">No disruption rows returned.</div>');
+                return;
+            }
+            const html = `<div><strong>Disruptions</strong> (${rows.length})</div>` + rows.slice(0, 25).map((r) => {
+                const text = disruptionText(r);
+                return `<div class="ops-service">${escapeHtml(text || JSON.stringify(r).slice(0, 180))}</div>`;
+            }).join("");
+            setOpsHtml(html);
+        } catch (err) {
+            setOpsHtml(`<div class="ops-empty">Disruption fetch failed: ${escapeHtml(err?.message || err)}</div>`);
+        }
+    }
 
     (async function initMap() {
         map = new maplibregl.Map({
@@ -162,6 +403,45 @@
 
         map.on("error", () => {
             setRailStatus("Rail map source unavailable.", "error");
+        });
+
+        const fetchBtn = document.getElementById("nr-fetch-inline");
+        const disBtn = document.getElementById("nr-disrupt-inline");
+        const clearBtn = document.getElementById("nr-clear-inline");
+        const input = document.getElementById("nr-crs-inline");
+
+        fetchBtn?.addEventListener("click", runBoardFetch);
+        disBtn?.addEventListener("click", runDisruptionsFetch);
+        clearBtn?.addEventListener("click", () => {
+            setOpsHtml('<div class="ops-empty">Rail ops ready.</div>');
+            if (stationMarker) {
+                stationMarker.remove();
+                stationMarker = null;
+            }
+        });
+        input?.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") {
+                ev.preventDefault();
+                runBoardFetch();
+            }
+        });
+        input?.addEventListener("input", () => {
+            const q = String(input.value || "").trim();
+            if (stationSuggestTimer) clearTimeout(stationSuggestTimer);
+            stationSuggestTimer = setTimeout(async () => {
+                if (!q || q.length < 2) return;
+                try {
+                    const stations = await fetchStationSuggestions(q);
+                    renderStationDatalist(stations);
+                } catch (_) {
+                    // ignore suggestion failures
+                }
+            }, 180);
+        });
+        input?.addEventListener("change", () => {
+            const key = String(input.value || "").trim().toUpperCase();
+            const hit = stationLookupByKey.get(key);
+            if (hit?.crs) input.value = hit.crs;
         });
     })();
     </script>
