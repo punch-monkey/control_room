@@ -257,10 +257,10 @@
       },
       { separator: true },
       {
-        icon: "&#128196;", label: "Add to 5x5x5 Report",
+        icon: "&#128196;", label: "Add to 3x5x2 Report",
         action: () => {
-          if (window._5x5x5Entities) {
-            window._5x5x5Entities.push(companyData);
+          if (window._3x5x2Entities) {
+            window._3x5x2Entities.push(companyData);
             if (typeof showToast === "function") showToast("Added to intelligence report", "success");
           }
         }
@@ -294,7 +294,7 @@
     // Expose for entity markers to call
     window.showEntityContextMenu = showEntityContextMenu;
     window.showResultContextMenu = showResultContextMenu;
-    window._5x5x5Entities = [];
+    window._3x5x2Entities = [];
   }
 
   if (document.readyState === "loading") {

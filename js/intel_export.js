@@ -1,5 +1,5 @@
 // ================== intel_export.js ==================
-// i2 Analyst's Notebook ANX export + 5x5x5 Intelligence Report generator
+// i2 Analyst's Notebook ANX export + 3x5x2 Intelligence Report generator (NCA Standard)
 
 (function () {
   "use strict";
@@ -151,49 +151,63 @@
   }
 
   // ═══════════════════════════════════════════════════
-  // 5x5x5 INTELLIGENCE REPORT
+  // 3x5x2 INTELLIGENCE REPORT (NCA Standard)
   // ═══════════════════════════════════════════════════
 
-  // The 5x5x5 system is the UK law enforcement standard for grading intelligence:
-  // Source Evaluation (A-E), Intelligence Assessment (1-5), Handling Code (1-5)
+  // The 3x5x2 system is the current NCA/College of Policing standard:
+  // Source Evaluation (A-C), Intelligence Assessment (1-5), Handling Code (P/C)
 
   const SOURCE_GRADES = {
-    A: "Always reliable — Trusted, no doubt about authenticity, competence, or reliability",
-    B: "Mostly reliable — Source from whom information received has in most instances proved to be reliable",
-    C: "Sometimes reliable — Source from whom information received has occasionally proved to be reliable",
-    D: "Unreliable — Source from whom information received has proved unreliable in the past",
-    E: "Untested — Source whose reliability cannot be judged; no basis for evaluation"
+    A: "Reliable — No doubt about authenticity, trustworthiness, competence, or track record of reliability",
+    B: "Untested — Source has not yet been tested or not tested against this type of intelligence",
+    C: "Not reliable — Doubts exist about the reliability, trustworthiness, or competence of the source"
   };
 
   const INTEL_GRADES = {
-    1: "Known to be true — without reservation",
-    2: "Known personally to the source but not corroborated",
-    3: "Not known personally to the source but corroborated",
-    4: "Cannot be judged — provided by a reliable source",
-    5: "Suspected to be false or malicious"
+    1: "Known to be true without reservation",
+    2: "Known personally to the source but not otherwise corroborated",
+    3: "Not known personally to the source but corroborated by other information",
+    4: "Cannot be judged — insufficient information to evaluate",
+    5: "Suspected to be false, based on unreliable information or an unreliable source"
   };
 
   const HANDLING_CODES = {
-    1: "Permits further dissemination within law enforcement",
-    2: "Permits dissemination to law enforcement and prosecuting authority",
-    3: "Permits dissemination to non-prosecuting parties (e.g. regulatory bodies)",
-    4: "Permits dissemination within originating agency only",
-    5: "Permits dissemination to designated officers/intelligence staff only"
+    P: "Permits dissemination — May be shared with other agencies and partners in line with local policy",
+    C: "Confidential — Do not disseminate; refer to originator before any onward sharing"
   };
 
-  function generate5x5x5Report() {
+  // Intel source types — includes restricted LE/FI systems (data entry only, no API)
+  const INTEL_SOURCE_TYPES = {
+    primary:    { label: "Primary Source",        desc: "Direct intelligence from the reporting officer or agent", restricted: false },
+    supplementary: { label: "Supplementary Intel",  desc: "Corroborating or additional intelligence from other sources", restricted: false },
+    sar:        { label: "SAR (Suspicious Activity Report)", desc: "Filed under Part 7 of POCA 2002 / S21A of the Terrorism Act 2000", restricted: true },
+    experian:   { label: "Experian / Credit Reference", desc: "Credit history, address links, associates — Experian, Equifax, TransUnion", restricted: true },
+    connexus:   { label: "GB Connexus",            desc: "NCA gateway intelligence sharing platform", restricted: true },
+    pnc:        { label: "PNC (Police National Computer)", desc: "Criminal records, wanted/missing, vehicle checks, disqualified drivers", restricted: true },
+    pnd:        { label: "PND (Police National Database)", desc: "Intelligence reports, custody records, crime reports across forces", restricted: true },
+    elmer:      { label: "ELMER/DAML",             desc: "Defence Against Money Laundering — SARs database held by UKFIU", restricted: true },
+    companies_house: { label: "Companies House",   desc: "Public company filings, officers, PSC data", restricted: false },
+    land_registry:   { label: "HM Land Registry",  desc: "Property ownership, price paid, title deeds", restricted: false },
+    open_source: { label: "Open Source (OSINT)",   desc: "Publicly available information — social media, media, web", restricted: false },
+    other:      { label: "Other",                  desc: "Specify source in notes field", restricted: false }
+  };
+
+  let _intelEntries = [];
+
+  function generate3x5x2Report() {
+    _intelEntries = [];
     const modal = document.createElement("div");
     modal.className = "intel-report-overlay";
     modal.id = "intel-report-modal";
 
     const entities = window._mapEntities || [];
     const connections = window._mapConnections || [];
-    const reportEntities = (window._5x5x5Entities || []).length ? window._5x5x5Entities : [];
 
     modal.innerHTML = `
       <div class="intel-report-dialog">
         <div class="intel-report-header">
-          <span class="intel-report-title">5x5x5 INTELLIGENCE REPORT</span>
+          <span class="intel-report-title">3x5x2 INTELLIGENCE REPORT</span>
+          <span class="intel-report-subtitle">NCA / College of Policing Standard</span>
           <button class="intel-report-close" id="intel-report-close">&times;</button>
         </div>
         <div class="intel-report-body">
@@ -208,13 +222,13 @@
           </div>
 
           <div class="intel-report-section">
-            <label>Date/Time of Intelligence</label>
+            <label>Date/Time of Report</label>
             <input type="datetime-local" id="ir-datetime" value="${new Date().toISOString().slice(0,16)}" />
           </div>
 
           <div class="intel-report-row-3">
             <div class="intel-report-section">
-              <label>Source Evaluation (A-E)</label>
+              <label>Source Evaluation (A-C)</label>
               <select id="ir-source-grade">
                 ${Object.entries(SOURCE_GRADES).map(([k, v]) => `<option value="${k}" title="${esc(v)}">${k} — ${v.split("—")[0].trim()}</option>`).join("")}
               </select>
@@ -226,7 +240,7 @@
               </select>
             </div>
             <div class="intel-report-section">
-              <label>Handling Code (1-5)</label>
+              <label>Handling Code (P/C)</label>
               <select id="ir-handling-code">
                 ${Object.entries(HANDLING_CODES).map(([k, v]) => `<option value="${k}">${k} — ${v.split("—")[0].trim()}</option>`).join("")}
               </select>
@@ -239,12 +253,30 @@
           </div>
 
           <div class="intel-report-section">
-            <label>Intelligence Text</label>
-            <textarea id="ir-text" rows="6" placeholder="Detailed intelligence narrative..."></textarea>
+            <label>Risk Assessment</label>
+            <select id="ir-risk">
+              <option value="low">Low — No threat to life or operations</option>
+              <option value="medium">Medium — Potential operational risk</option>
+              <option value="high">High — Significant risk to life, operations, or sources</option>
+              <option value="critical">Critical — Immediate threat to life</option>
+            </select>
+          </div>
+
+          <div class="intel-report-divider">INTELLIGENCE ENTRIES</div>
+
+          <div class="intel-entries-toolbar">
+            <select id="ir-new-entry-type">
+              ${Object.entries(INTEL_SOURCE_TYPES).map(([k, v]) => `<option value="${k}" ${v.restricted ? 'class="ir-restricted"' : ''}>${v.label}${v.restricted ? " [RESTRICTED]" : ""}</option>`).join("")}
+            </select>
+            <button class="btn-primary btn-sm" id="ir-add-entry" type="button">+ Add Entry</button>
+          </div>
+
+          <div id="ir-entries-list" class="ir-entries-list">
+            <div class="ir-entries-empty">No entries yet. Add a primary source entry to begin.</div>
           </div>
 
           <div class="intel-report-section">
-            <label>Entities Referenced (${entities.length} on map, ${reportEntities.length} flagged)</label>
+            <label>Entities Referenced (${entities.length} on map)</label>
             <div class="ir-entity-chips" id="ir-entity-chips">
               ${entities.slice(0, 30).map(e => `<span class="ir-chip" data-eid="${e.id}">${esc(e.label.slice(0,25))}</span>`).join("")}
             </div>
@@ -253,16 +285,6 @@
           <div class="intel-report-section">
             <label>Sanitisation Notes</label>
             <textarea id="ir-sanitisation" rows="2" placeholder="Any redactions or sanitisation applied..."></textarea>
-          </div>
-
-          <div class="intel-report-section">
-            <label>Risk Assessment</label>
-            <select id="ir-risk">
-              <option value="low">Low — No threat to life or operations</option>
-              <option value="medium">Medium — Potential operational risk</option>
-              <option value="high">High — Significant risk to life, operations, or sources</option>
-              <option value="critical">Critical — Immediate threat to life</option>
-            </select>
           </div>
 
           <div class="intel-report-actions">
@@ -278,8 +300,15 @@
     modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
     document.getElementById("intel-report-close")?.addEventListener("click", () => modal.remove());
 
+    // Add entry button
+    document.getElementById("ir-add-entry")?.addEventListener("click", () => {
+      const typeKey = document.getElementById("ir-new-entry-type")?.value || "primary";
+      addIntelEntry(typeKey);
+    });
+
     // Generate PDF
     document.getElementById("ir-generate-pdf")?.addEventListener("click", () => {
+      collectIntelEntryData();
       const reportData = collectReportData();
       generateReportPDF(reportData);
       modal.remove();
@@ -287,17 +316,120 @@
 
     // Export JSON
     document.getElementById("ir-export-json")?.addEventListener("click", () => {
+      collectIntelEntryData();
       const reportData = collectReportData();
-      downloadFile(JSON.stringify(reportData, null, 2), `5x5x5_report_${Date.now()}.json`, "application/json");
+      downloadFile(JSON.stringify(reportData, null, 2), `3x5x2_report_${Date.now()}.json`, "application/json");
       modal.remove();
     });
 
     // Copy text
     document.getElementById("ir-copy-text")?.addEventListener("click", () => {
+      collectIntelEntryData();
       const reportData = collectReportData();
       const text = formatReportAsText(reportData);
       navigator.clipboard?.writeText(text);
       if (typeof showToast === "function") showToast("Report copied to clipboard", "success");
+    });
+
+    // Auto-add a primary source entry
+    addIntelEntry("primary");
+  }
+
+  function addIntelEntry(typeKey) {
+    const sourceType = INTEL_SOURCE_TYPES[typeKey] || INTEL_SOURCE_TYPES.primary;
+    const entryId = `ir-entry-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    const entry = { id: entryId, type: typeKey, sourceType };
+    _intelEntries.push(entry);
+    renderIntelEntries();
+  }
+
+  function removeIntelEntry(entryId) {
+    _intelEntries = _intelEntries.filter(e => e.id !== entryId);
+    renderIntelEntries();
+  }
+
+  function renderIntelEntries() {
+    const container = document.getElementById("ir-entries-list");
+    if (!container) return;
+    if (!_intelEntries.length) {
+      container.innerHTML = '<div class="ir-entries-empty">No entries yet. Add a primary source entry to begin.</div>';
+      return;
+    }
+    container.innerHTML = _intelEntries.map((entry, idx) => {
+      const st = entry.sourceType;
+      const restrictedBadge = st.restricted ? '<span class="ir-restricted-badge">RESTRICTED</span>' : '';
+      return `<div class="ir-entry-card" data-entry-id="${entry.id}">
+        <div class="ir-entry-header">
+          <span class="ir-entry-number">${idx + 1}</span>
+          <span class="ir-entry-type-label">${esc(st.label)}</span>
+          ${restrictedBadge}
+          <button class="ir-entry-remove" data-remove-id="${entry.id}" type="button" title="Remove entry">&times;</button>
+        </div>
+        <div class="ir-entry-desc">${esc(st.desc)}</div>
+        <div class="ir-entry-fields">
+          <label>Source Reference / Log Number</label>
+          <input type="text" class="ir-entry-ref" placeholder="${getRefPlaceholder(entry.type)}" />
+          <label>Date of Intelligence</label>
+          <input type="datetime-local" class="ir-entry-date" value="${new Date().toISOString().slice(0,16)}" />
+          <label>Intelligence Summary</label>
+          <textarea class="ir-entry-text" rows="3" placeholder="${getTextPlaceholder(entry.type)}"></textarea>
+          ${st.restricted ? `<div class="ir-entry-restricted-note">This source system is not publicly accessible. Data must be entered manually from an authorised terminal.</div>` : ''}
+        </div>
+      </div>`;
+    }).join("");
+
+    // Wire remove buttons
+    container.querySelectorAll("[data-remove-id]").forEach(btn => {
+      btn.addEventListener("click", () => removeIntelEntry(btn.dataset.removeId));
+    });
+  }
+
+  function getRefPlaceholder(type) {
+    const placeholders = {
+      primary: "e.g. Source reference or handler code",
+      supplementary: "e.g. Cross-reference number",
+      sar: "e.g. SAR URN / UKFIU reference",
+      experian: "e.g. Experian search reference / batch ID",
+      connexus: "e.g. Connexus log reference",
+      pnc: "e.g. PNC ID / CRO number",
+      pnd: "e.g. PND reference / intelligence log number",
+      elmer: "e.g. DAML reference / SAR number",
+      companies_house: "e.g. Company number",
+      land_registry: "e.g. Title number",
+      open_source: "e.g. URL or media reference",
+      other: "Reference number"
+    };
+    return placeholders[type] || "Reference";
+  }
+
+  function getTextPlaceholder(type) {
+    const placeholders = {
+      primary: "Primary intelligence narrative...",
+      supplementary: "Corroborating or supplementary intelligence...",
+      sar: "SAR summary — filing reason, subjects, financial activity...",
+      experian: "Credit search results — addresses linked, financial associations...",
+      connexus: "Connexus intelligence summary — linked records, partner contributions...",
+      pnc: "PNC check results — convictions, bail conditions, markers...",
+      pnd: "PND intelligence — linked reports, custody, crime records...",
+      elmer: "DAML/ELMER results — consent status, linked SARs...",
+      companies_house: "Company details — officers, filing history, PSC data...",
+      land_registry: "Property details — ownership, price paid, title info...",
+      open_source: "Open source findings — social media, press, public records...",
+      other: "Intelligence text..."
+    };
+    return placeholders[type] || "Intelligence text...";
+  }
+
+  function collectIntelEntryData() {
+    const container = document.getElementById("ir-entries-list");
+    if (!container) return;
+    const cards = container.querySelectorAll(".ir-entry-card");
+    cards.forEach((card, idx) => {
+      if (_intelEntries[idx]) {
+        _intelEntries[idx].reference = card.querySelector(".ir-entry-ref")?.value || "";
+        _intelEntries[idx].date = card.querySelector(".ir-entry-date")?.value || "";
+        _intelEntries[idx].text = card.querySelector(".ir-entry-text")?.value || "";
+      }
     });
   }
 
@@ -306,22 +438,39 @@
       reference: document.getElementById("ir-reference")?.value || "",
       officer: document.getElementById("ir-officer")?.value || "",
       datetime: document.getElementById("ir-datetime")?.value || "",
-      sourceGrade: document.getElementById("ir-source-grade")?.value || "E",
+      sourceGrade: document.getElementById("ir-source-grade")?.value || "B",
       intelGrade: document.getElementById("ir-intel-grade")?.value || "4",
-      handlingCode: document.getElementById("ir-handling-code")?.value || "1",
+      handlingCode: document.getElementById("ir-handling-code")?.value || "P",
       subject: document.getElementById("ir-subject")?.value || "",
-      text: document.getElementById("ir-text")?.value || "",
       sanitisation: document.getElementById("ir-sanitisation")?.value || "",
       risk: document.getElementById("ir-risk")?.value || "low",
+      entries: _intelEntries.map(e => ({
+        type: e.type,
+        label: e.sourceType.label,
+        restricted: e.sourceType.restricted,
+        reference: e.reference || "",
+        date: e.date || "",
+        text: e.text || ""
+      })),
+      // Legacy compat — first entry text as primary
+      text: _intelEntries[0]?.text || "",
       entityCount: window._mapEntities?.length || 0,
       connectionCount: window._mapConnections?.length || 0,
-      gradeLabel: `${document.getElementById("ir-source-grade")?.value || "E"}${document.getElementById("ir-intel-grade")?.value || "4"}${document.getElementById("ir-handling-code")?.value || "1"}`
+      gradeLabel: `${document.getElementById("ir-source-grade")?.value || "B"}${document.getElementById("ir-intel-grade")?.value || "4"}${document.getElementById("ir-handling-code")?.value || "P"}`
     };
   }
 
   function formatReportAsText(r) {
+    const entriesText = (r.entries || []).map((e, i) => {
+      return `
+  ENTRY ${i + 1}: ${e.label}${e.restricted ? " [RESTRICTED]" : ""}
+  Reference: ${e.reference || "N/A"}
+  Date:      ${e.date || "N/A"}
+  ${e.text || "No detail provided."}`;
+    }).join("\n  ───────────────────────────────────────────\n");
+
     return `═══════════════════════════════════════════════
-5x5x5 INTELLIGENCE REPORT
+3x5x2 INTELLIGENCE REPORT (NCA Standard)
 ═══════════════════════════════════════════════
 Reference:       ${r.reference}
 Classification:  ${r.gradeLabel} (Source: ${r.sourceGrade}, Intel: ${r.intelGrade}, Handling: ${r.handlingCode})
@@ -338,8 +487,8 @@ INTEL ASSESSMENT:  ${r.intelGrade} — ${INTEL_GRADES[r.intelGrade] || "Unknown"
 HANDLING CODE:     ${r.handlingCode} — ${HANDLING_CODES[r.handlingCode] || "Unknown"}
 
 ───────────────────────────────────────────────
-INTELLIGENCE:
-${r.text}
+INTELLIGENCE ENTRIES (${(r.entries || []).length}):
+${entriesText || "  No entries."}
 
 ───────────────────────────────────────────────
 ENTITIES: ${r.entityCount} mapped | CONNECTIONS: ${r.connectionCount}
@@ -368,7 +517,7 @@ Generated by Control Room — ${new Date().toISOString()}
     doc.setTextColor(45, 212, 191);
     doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
-    doc.text("5x5x5 INTELLIGENCE REPORT", margin, 18);
+    doc.text("3x5x2 INTELLIGENCE REPORT", margin, 18);
     doc.setFontSize(10);
     doc.setTextColor(148, 163, 184);
     doc.text(`Reference: ${r.reference}`, margin, 28);
@@ -408,21 +557,66 @@ Generated by Control Room — ${new Date().toISOString()}
     doc.text(subjectLines, margin, y);
     y += subjectLines.length * 5 + 8;
 
-    // Intelligence text
-    doc.setTextColor(226, 232, 240);
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text("INTELLIGENCE", margin, y);
-    y += 6;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(203, 213, 225);
-    const intelLines = doc.splitTextToSize(r.text || "No intelligence text provided.", textWidth);
-    intelLines.forEach(line => {
-      if (y > 270) { doc.addPage(); y = margin; }
-      doc.text(line, margin, y);
-      y += 4.5;
-    });
+    // Intelligence entries
+    const entries = r.entries || [];
+    if (entries.length) {
+      doc.setTextColor(226, 232, 240);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text(`INTELLIGENCE ENTRIES (${entries.length})`, margin, y);
+      y += 8;
+
+      entries.forEach((entry, idx) => {
+        if (y > 250) { doc.addPage(); y = margin; }
+
+        // Entry header bar
+        doc.setFillColor(25, 35, 50);
+        doc.rect(margin, y - 3, textWidth, 12, "F");
+        doc.setTextColor(103, 232, 249);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text(`ENTRY ${idx + 1}: ${entry.label || "Unknown"}${entry.restricted ? " [RESTRICTED]" : ""}`, margin + 4, y + 4);
+        if (entry.reference) {
+          doc.setTextColor(148, 163, 184);
+          doc.setFont("helvetica", "normal");
+          doc.text(`Ref: ${entry.reference}`, margin + textWidth - 50, y + 4);
+        }
+        y += 14;
+
+        if (entry.date) {
+          doc.setTextColor(148, 163, 184);
+          doc.setFontSize(8);
+          doc.text(`Date: ${entry.date}`, margin + 4, y);
+          y += 5;
+        }
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(203, 213, 225);
+        const entryLines = doc.splitTextToSize(entry.text || "No detail provided.", textWidth - 8);
+        entryLines.forEach(line => {
+          if (y > 270) { doc.addPage(); y = margin; }
+          doc.text(line, margin + 4, y);
+          y += 4.5;
+        });
+        y += 6;
+      });
+    } else {
+      doc.setTextColor(226, 232, 240);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("INTELLIGENCE", margin, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(203, 213, 225);
+      const intelLines = doc.splitTextToSize(r.text || "No intelligence text provided.", textWidth);
+      intelLines.forEach(line => {
+        if (y > 270) { doc.addPage(); y = margin; }
+        doc.text(line, margin, y);
+        y += 4.5;
+      });
+    }
     y += 8;
 
     // Grading explanations
@@ -445,9 +639,9 @@ Generated by Control Room — ${new Date().toISOString()}
     doc.text("Generated by Control Room Intelligence Dashboard", margin, y);
 
     // Save
-    doc.save(`5x5x5_${r.reference.replace(/[/\\]/g, "_")}_${Date.now()}.pdf`);
-    if (window.CRDashboard) window.CRDashboard.logActivity("5x5x5 report generated", r.reference, "export");
-    if (typeof showToast === "function") showToast("5x5x5 report PDF generated", "success");
+    doc.save(`3x5x2_${r.reference.replace(/[/\\]/g, "_")}_${Date.now()}.pdf`);
+    if (window.CRDashboard) window.CRDashboard.logActivity("3x5x2 report generated", r.reference, "export");
+    if (typeof showToast === "function") showToast("3x5x2 report PDF generated", "success");
   }
 
   // ═══════════════════════════════════════════════════
@@ -624,7 +818,8 @@ Generated by Control Room — ${new Date().toISOString()}
 
   // ── Exports ──
   window.exportI2ANX = exportI2ANX;
-  window.generate5x5x5Report = generate5x5x5Report;
+  window.generate3x5x2Report = generate3x5x2Report;
+  window.generate5x5x5Report = generate3x5x2Report; // backward compat alias
   window.exportStructuredExcel = exportStructuredExcel;
   window.searchLandRegistry = searchLandRegistry;
   window.searchDisqualifiedDirectors = searchDisqualifiedDirectors;

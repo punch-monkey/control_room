@@ -424,8 +424,8 @@
     registerShortcut("ctrl+shift+x", "Export i2 ANX", () => {
       if (typeof window.exportI2ANX === "function") window.exportI2ANX();
     });
-    registerShortcut("ctrl+shift+r", "Generate 5x5x5 report", () => {
-      if (typeof window.generate5x5x5Report === "function") window.generate5x5x5Report();
+    registerShortcut("ctrl+shift+r", "Generate 3x5x2 report", () => {
+      if (typeof window.generate3x5x2Report === "function") window.generate3x5x2Report();
     });
     registerShortcut("f1", "Show keyboard shortcuts", () => {
       showShortcutsOverlay();
