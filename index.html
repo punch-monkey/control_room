@@ -343,7 +343,20 @@
             Supports `xlsx/xls/csv/tsv/txt` for entity import and `json/geojson` for overlay import. You can also drag and drop files here.
           </div>
         </div>
-        
+
+        <div class="doc-converter-panel">
+          <div class="doc-converter-title">Document Converter</div>
+          <div class="doc-converter-hint">Convert messy filenames to standardised format: <code>YYYYMMDD - Source - Subject</code></div>
+          <div class="cp-btn-row">
+            <button id="doc-converter-btn" class="btn-secondary" type="button">Browse Files</button>
+            <button id="doc-converter-dl-all" class="btn-secondary" type="button">Download All</button>
+          </div>
+          <input id="doc-converter-input" type="file" multiple accept=".pdf,.txt,.xlsx,.xls,.csv,.doc,.docx" style="display:none" />
+          <div id="doc-converter-results" class="dc-results">
+            <div class="dc-empty">Drop files or click Browse to convert</div>
+          </div>
+        </div>
+
         <div id="entity_selector" class="entity-grid">
           <!-- Populated by JavaScript -->
         </div>
@@ -850,6 +863,7 @@
   <script src="js/context_menu.js"></script>
   <script src="js/intel_export.js"></script>
   <script src="js/intel_import.js"></script>
+  <script src="js/doc_converter.js"></script>
 
   <!-- Wire KPI bar action buttons -->
   <script>

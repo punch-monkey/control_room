@@ -5445,3 +5445,135 @@ button.flight-filter-item span {
   color: #fff;
   font-weight: 600;
 }
+
+/* -------------------------------------------------------
+   Document Converter Panel
+   ------------------------------------------------------- */
+.doc-converter-panel {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: rgba(30, 32, 44, 0.85);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 8px;
+}
+.doc-converter-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #a5b4fc;
+  margin-bottom: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.doc-converter-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+.doc-converter-hint code {
+  background: rgba(99, 102, 241, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  color: #c7d2fe;
+}
+.dc-results {
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.dc-empty {
+  color: #64748b;
+  font-size: 0.72rem;
+  text-align: center;
+  padding: 12px 0;
+}
+.dc-loading {
+  color: #a5b4fc;
+  font-size: 0.72rem;
+  text-align: center;
+  padding: 12px 0;
+}
+.dc-result {
+  background: rgba(15, 17, 26, 0.7);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.dc-result.dc-error {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.dc-original {
+  font-size: 0.7rem;
+  color: #ef4444;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.dc-arrow {
+  text-align: center;
+  color: #6366f1;
+  font-size: 0.8rem;
+  line-height: 1;
+  margin: 2px 0;
+}
+.dc-converted {
+  font-size: 0.72rem;
+  color: #22c55e;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dc-desc {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  margin-top: 3px;
+  font-style: italic;
+}
+.dc-label {
+  color: #64748b;
+  font-weight: 600;
+  font-style: normal;
+}
+.dc-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.dc-badge {
+  font-size: 0.62rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.dc-badge-orig {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+}
+.dc-badge-date {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+}
+.dc-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.dc-dl-btn, .dc-dl-desc-btn {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #c7d2fe;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dc-dl-btn:hover, .dc-dl-desc-btn:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
