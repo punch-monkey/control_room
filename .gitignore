@@ -23,7 +23,8 @@ data/points_of_interest/
 data/bellingcat*/
 
 # Large individual files (GitHub 100MB limit)
-data/geojson/
+data/geojson/*
+!data/geojson/service_stations.geojson
 data/police_force_areas_wgs84.geojson
 data/postcodes.json
 data/companies_house_subset.csv

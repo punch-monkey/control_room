@@ -328,9 +328,6 @@
     const sessionEl = document.getElementById("kpi-session");
     if (sessionEl) sessionEl.textContent = hrs > 0 ? `${hrs}h ${dispMins}m` : `${dispMins}m`;
 
-    // OPS score
-    const opsScore = (entities * 10) + (connections * 15) + (activeLayers * 4) + (searches * 2);
-    setKPI("kpi-ops-score", opsScore);
   }
 
   function setKPI(id, value) {

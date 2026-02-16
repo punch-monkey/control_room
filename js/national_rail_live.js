@@ -834,6 +834,7 @@ async function ensureNationalRailLoaded() {
   return NR.stationsLoading;
 }
 window.ensureNationalRailLoaded = ensureNationalRailLoaded;
+window.setNrLineMode = setLineMode;
 
 function focusStationByCrs(crs, openPopup = true) {
   const marker = getMarkerForCrs(crs);

@@ -3140,34 +3140,9 @@ function updateDashboardCounts() {
   const cpEntitiesChip = document.getElementById("cp-entities-chip");
   const cpLinksChip = document.getElementById("cp-links-chip");
   const cpActiveLayersChip = document.getElementById("cp-active-layers");
-  const cpOpsScoreChip = document.getElementById("cp-ops-score");
-  const cpOpsRankChip = document.getElementById("cp-ops-rank");
-
   if (cpEntitiesChip) cpEntitiesChip.textContent = String(totalEntities);
   if (cpLinksChip) cpLinksChip.textContent = String(totalConnections);
   if (cpActiveLayersChip) cpActiveLayersChip.textContent = String(activeLayerCount);
-
-  const opsScore = (totalEntities * 10) + (totalConnections * 15) + (activeLayerCount * 4);
-  if (cpOpsScoreChip) cpOpsScoreChip.textContent = String(opsScore);
-
-  const rankBands = [
-    { min: 0, label: "Observer" },
-    { min: 120, label: "Analyst" },
-    { min: 280, label: "Controller" },
-    { min: 520, label: "Commander" }
-  ];
-  let rankIndex = 0;
-  for (let i = rankBands.length - 1; i >= 0; i -= 1) {
-    if (opsScore >= rankBands[i].min) {
-      rankIndex = i;
-      break;
-    }
-  }
-  if (cpOpsRankChip) cpOpsRankChip.textContent = rankBands[rankIndex].label;
-  if (lastOpsRankIndex >= 0 && rankIndex > lastOpsRankIndex && opsScore > 0) {
-    showToast(`Rank up: ${rankBands[rankIndex].label}`, "success", 2200);
-  }
-  lastOpsRankIndex = rankIndex;
 
   // Sync KPI bar
   if (window.CRDashboard) window.CRDashboard.updateKPIs();
@@ -4222,25 +4197,17 @@ async function ensureServiceStationsLoaded() {
   if (OVERLAY_LOAD_STATE.serviceStationsLoaded) return true;
   if (OVERLAY_LOAD_STATE.serviceStationsLoading) return OVERLAY_LOAD_STATE.serviceStationsLoading;
 
-  OVERLAY_LOAD_STATE.serviceStationsLoading = fetch("data/geojson/gbr_points_of_interest_points_geojson.geojson")
+  OVERLAY_LOAD_STATE.serviceStationsLoading = fetch("data/geojson/service_stations.geojson")
     .then((r) => r.json())
     .then((data) => {
       const features = Array.isArray(data?.features) ? data.features : [];
-      const selected = features.filter((f) => {
-        const amenity = String(f?.properties?.amenity || "").toLowerCase();
-        return amenity === "fuel" ||
-          amenity === "charging_station" ||
-          amenity === "car_repair" ||
-          amenity === "car_wash" ||
-          amenity === "truck_stop";
-      });
 
-      if (!selected.length) {
-        setStatus("No service station features found in POI dataset.");
+      if (!features.length) {
+        setStatus("No service station features found.");
         return false;
       }
 
-      selected.forEach((f) => {
+      features.forEach((f) => {
         const coords = f?.geometry?.coordinates;
         if (!Array.isArray(coords) || coords.length < 2) return;
         const lon = Number(coords[0]);
@@ -4254,7 +4221,7 @@ async function ensureServiceStationsLoaded() {
       });
       OVERLAY_LOAD_STATE.serviceStationsLoaded = true;
       applyServiceStationFilters();
-      setStatus(`Service stations loaded (${selected.length}).`);
+      setStatus(`Service stations loaded (${features.length}).`);
       return true;
     })
     .catch((e) => {
@@ -5826,33 +5793,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const quickLayerUndergroundBtn = document.getElementById("quick-layer-underground");
   const quickLayerFlightsBtn = document.getElementById("quick-layer-flights");
   const quickLayerHealthBtn = document.getElementById("quick-layer-health");
-  const layerPresetTransportBtn = document.getElementById("layer-preset-transport");
-  const layerPresetIntelBtn = document.getElementById("layer-preset-intel");
-  const layerPresetClearBtn = document.getElementById("layer-preset-clear");
-
   function setLayerEnabled(layerId, enabled) {
     const cb = document.querySelector(`.layer-cb[data-layer="${layerId}"]`);
     if (!cb) return;
     if (cb.checked === enabled) return;
     cb.checked = !!enabled;
     cb.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function applyLayerPreset(preset) {
-    const presets = {
-      transport: new Set(["companies", "airports_uk", "seaports", "underground", "national_rail", "service_stations"]),
-      intel: new Set(["companies", "areas", "airports_uk", "underground", "national_rail", "flights"]),
-      clear: new Set(["companies"])
-    };
-    const selected = presets[preset] || presets.clear;
-    document.querySelectorAll(".layer-cb").forEach((cb) => {
-      const layerId = String(cb.dataset.layer || "");
-      setLayerEnabled(layerId, selected.has(layerId));
-    });
-    updateDashboardCounts();
-    if (preset === "transport") showToast("Preset applied: Transport Focus", "success");
-    if (preset === "intel") showToast("Preset applied: Intel Focus", "success");
-    if (preset === "clear") showToast("Preset applied: Clear All (core kept)", "info");
   }
 
   quickLayerUndergroundBtn?.addEventListener("click", () => toggleLayerFromQuickAction("underground"));
@@ -5863,9 +5809,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       showToast("Refreshing service health checks", "info");
     }
   });
-  layerPresetTransportBtn?.addEventListener("click", () => applyLayerPreset("transport"));
-  layerPresetIntelBtn?.addEventListener("click", () => applyLayerPreset("intel"));
-  layerPresetClearBtn?.addEventListener("click", () => applyLayerPreset("clear"));
 
   document.addEventListener("click", (e) => {
     if (!cpMenu || !cpMenuBtn) return;
@@ -5876,21 +5819,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // â”€â”€ Base layer pills â”€â”€
-  document.querySelectorAll("#base-pills .bl-pill").forEach(pill => {
+  document.querySelectorAll("#base-pills [data-base]").forEach(pill => {
     pill.addEventListener("click", () => {
       const name = pill.dataset.base;
       if (name === activeBase) return;
       map.removeLayer(baseLayers[activeBase]);
       baseLayers[name].addTo(map);
       activeBase = name;
-      document.querySelectorAll("#base-pills .bl-pill").forEach(p => p.classList.remove("active"));
+      document.querySelectorAll("#base-pills [data-base]").forEach(p => p.classList.remove("active"));
       pill.classList.add("active");
     });
   });
 
   // ── UI Theme pills ──
   (function initThemePills() {
-    const pills = document.querySelectorAll("#theme-pills .bl-pill");
+    const pills = document.querySelectorAll("#theme-pills [data-theme]");
     const saved = localStorage.getItem("cr-theme") || "indigo";
     pills.forEach(p => {
       p.classList.toggle("active", p.dataset.theme === saved);
@@ -5956,6 +5899,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   syncLayerToolBlocks();
   updateDashboardCounts();
+
+  // ── Railway mode pills ──
+  document.querySelectorAll("[data-rail-mode]").forEach(pill => {
+    pill.addEventListener("click", () => {
+      const mode = pill.dataset.railMode;
+      document.querySelectorAll("[data-rail-mode]").forEach(p => p.classList.remove("active"));
+      pill.classList.add("active");
+      if (window.setNrLineMode) window.setNrLineMode(mode);
+    });
+  });
 
   const airportSearchInput = document.getElementById("airport-search-q");
   const airportSearchBtn = document.getElementById("airport-search-btn");

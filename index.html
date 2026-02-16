@@ -75,16 +75,31 @@
         <span class="kpi-value" id="kpi-alerts">0</span>
         <span class="kpi-label">Alerts</span>
       </div>
-      <div class="kpi-card kpi-card-ops" title="Operational complexity score">
-        <span class="kpi-value" id="kpi-ops-score">0</span>
-        <span class="kpi-label">OPS</span>
-      </div>
     </div>
     <div class="kpi-separator"></div>
     <div class="kpi-live-info">
       <span class="kpi-clock" id="kpi-clock">--:--:--</span>
       <span class="kpi-coords" id="kpi-coords" title="Map centre coordinates">--</span>
       <span class="kpi-zoom" id="kpi-zoom" title="Zoom level">Z--</span>
+    </div>
+    <div class="kpi-separator"></div>
+    <div class="kpi-pill-group">
+      <span class="kpi-pill-label">Map</span>
+      <div class="kpi-pills" id="base-pills">
+        <button class="kpi-pill active" data-base="Dark">Dark</button>
+        <button class="kpi-pill" data-base="Grey">Grey</button>
+        <button class="kpi-pill" data-base="Street">Street</button>
+        <button class="kpi-pill" data-base="Satellite">Sat</button>
+      </div>
+    </div>
+    <div class="kpi-pill-group">
+      <span class="kpi-pill-label">Theme</span>
+      <div class="kpi-pills" id="theme-pills">
+        <button class="kpi-pill active" data-theme="indigo">Indigo</button>
+        <button class="kpi-pill" data-theme="warm">Warm</button>
+        <button class="kpi-pill" data-theme="arctic">Arctic</button>
+        <button class="kpi-pill" data-theme="teal">Teal</button>
+      </div>
     </div>
     <div class="kpi-separator"></div>
     <div class="kpi-actions">
@@ -113,7 +128,6 @@
       <span class="cp-meta-chip"><strong id="cp-active-layers">0</strong> Layers</span>
       <span class="cp-meta-chip"><strong id="cp-entities-chip">0</strong> Entities</span>
       <span class="cp-meta-chip"><strong id="cp-links-chip">0</strong> Links</span>
-      <span class="cp-meta-chip cp-meta-chip-score"><strong id="cp-ops-score">0</strong> OPS <em id="cp-ops-rank">Observer</em></span>
     </div>
 
     <div class="cp-body" id="cp-body">
@@ -464,30 +478,6 @@
         </div>
         <div class="cp-quick-hint">Layers load on demand. Turn on only what you need for smoother map performance.</div>
 
-        <div class="layer-section-title">Layer Presets</div>
-        <div class="cp-btn-row">
-          <button id="layer-preset-transport" class="btn-secondary" type="button">Transport Focus</button>
-          <button id="layer-preset-intel" class="btn-secondary" type="button">Intel Focus</button>
-          <button id="layer-preset-clear" class="btn-secondary" type="button">Clear All</button>
-        </div>
-        <div class="cp-quick-hint">Presets toggle multiple layers in one click. You can still fine-tune manually.</div>
-
-        <div class="layer-section-title">Base Map</div>
-        <div class="base-pills" id="base-pills">
-          <button class="bl-pill active" data-base="Dark">Dark</button>
-          <button class="bl-pill" data-base="Grey">Grey</button>
-          <button class="bl-pill" data-base="Street">Street</button>
-          <button class="bl-pill" data-base="Satellite">Satellite</button>
-        </div>
-
-        <div class="layer-section-title">UI Theme</div>
-        <div class="base-pills" id="theme-pills">
-          <button class="bl-pill active" data-theme="indigo">Indigo</button>
-          <button class="bl-pill" data-theme="warm">Warm</button>
-          <button class="bl-pill" data-theme="arctic">Arctic</button>
-          <button class="bl-pill" data-theme="teal">Teal</button>
-        </div>
-
         <div class="layer-section-title">Overlay Groups</div>
 
         <details class="panel-disclosure" open>
@@ -504,8 +494,13 @@
             <input type="checkbox" class="layer-cb" data-layer="national_rail">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#38bdf8"></span>
-            <span class="layer-name">National Rail Stations (GB)</span>
+            <span class="layer-name">National Rail Stations</span>
           </label>
+          <div class="layer-sub-pills" data-requires="national_rail">
+            <button class="layer-sub-pill active" data-rail-mode="all">All Railways</button>
+            <button class="layer-sub-pill" data-rail-mode="major">Major</button>
+            <button class="layer-sub-pill" data-rail-mode="minor">Minor</button>
+          </div>
 
           <label class="layer-row">
             <input type="checkbox" class="layer-cb" data-layer="service_stations">
