@@ -476,21 +476,72 @@
           <button id="quick-layer-flights" class="quick-action-btn" type="button">Toggle Flights</button>
           <button id="quick-layer-health" class="quick-action-btn" type="button">Refresh Health</button>
         </div>
-        <div class="cp-quick-hint">Layers load on demand. Turn on only what you need for smoother map performance.</div>
+        <div class="cp-quick-hint">Layers now support presets, search, and smart prefetch. Load only what you need.</div>
 
-        <div class="layer-section-title">Overlay Groups</div>
+        <div class="layer-status-grid">
+          <div class="layer-status-card">
+            <span class="layer-status-label">Active Layers</span>
+            <span class="layer-status-value" id="layer-summary-active">0</span>
+            <span class="layer-status-sub">Currently visible on map</span>
+          </div>
+          <div class="layer-status-card">
+            <span class="layer-status-label">Warmed Datasets</span>
+            <span class="layer-status-value" id="layer-summary-warmed">0</span>
+            <span class="layer-status-sub">Idle prefetched overlays</span>
+          </div>
+          <div class="layer-status-card layer-status-card-compact">
+            <span class="layer-status-label">Prefetch</span>
+            <span class="layer-status-chip" id="layer-summary-prefetch">AUTO</span>
+            <span class="layer-status-sub" id="layer-summary-prefetch-detail">Evaluating connection...</span>
+          </div>
+        </div>
 
-        <details class="panel-disclosure" open>
+        <div class="layer-search-panel">
+          <div class="layer-search-input">
+            <input id="layer-search-input" type="text" placeholder="Search layers (e.g. rail, crime, telecom)" aria-label="Search layers" />
+            <button id="layer-search-clear" class="btn-secondary btn-sm" type="button">Clear</button>
+          </div>
+          <div class="layer-search-meta">Filter stacks instantly or press <kbd>Esc</kbd> to reset.</div>
+        </div>
+
+        <div class="layer-section-title">Mission Loadouts</div>
+        <div class="layer-preset-grid">
+          <button class="layer-preset-btn" type="button" data-loadout="transport">
+            <span class="preset-title">Transport Sweep</span>
+            <span class="preset-sub">TfL · NR · Service/EV</span>
+          </button>
+          <button class="layer-preset-btn" type="button" data-loadout="aviation">
+            <span class="preset-title">Aviation Watch</span>
+            <span class="preset-sub">UK &amp; Global Airports · Flights</span>
+          </button>
+          <button class="layer-preset-btn" type="button" data-loadout="maritime">
+            <span class="preset-title">Maritime Ops</span>
+            <span class="preset-sub">Seaports · Live AIS</span>
+          </button>
+          <button class="layer-preset-btn" type="button" data-loadout="infrastructure">
+            <span class="preset-title">Critical Infrastructure</span>
+            <span class="preset-sub">Cell Towers · Crime Heat</span>
+          </button>
+        </div>
+        <div class="layer-preset-footer">
+          <button id="layer-reset-btn" class="layer-reset-btn" type="button">Reset to Baseline</button>
+          <span class="layer-preset-hint">Presets toggle recommended overlays. Reset keeps core layers only.</span>
+        </div>
+
+        <div class="layer-section-title">Layer Catalog</div>
+        <div id="layer-search-empty" class="layer-search-empty hidden">No layers match your search filter.</div>
+
+        <details class="panel-disclosure layer-group" data-layer-group="transport" open>
           <summary>Transport</summary>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="TfL Stations (Underground, DLR, Tram, Rail)">
             <input type="checkbox" class="layer-cb" data-layer="underground">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#f43f5e"></span>
             <span class="layer-name">TfL Stations (Underground, DLR, Tram, Rail)</span>
           </label>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="National Rail Stations">
             <input type="checkbox" class="layer-cb" data-layer="national_rail">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#38bdf8"></span>
@@ -502,46 +553,39 @@
             <button class="layer-sub-pill" data-rail-mode="minor">Minor</button>
           </div>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="Service Stations (Fuel/EV)">
             <input type="checkbox" class="layer-cb" data-layer="service_stations">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#facc15"></span>
             <span class="layer-name">Service Stations (Fuel/EV)</span>
           </label>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="Santander Cycles">
             <input type="checkbox" class="layer-cb" data-layer="bikes">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#22c55e"></span>
             <span class="layer-name">Santander Cycles</span>
           </label>
-
-          <label class="layer-row">
-            <input type="checkbox" class="layer-cb" data-layer="seaports">
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            <span class="layer-dot" style="background:#2dd4bf"></span>
-            <span class="layer-name">Seaports</span>
-          </label>
         </details>
 
-        <details class="panel-disclosure">
+        <details class="panel-disclosure layer-group" data-layer-group="aviation">
           <summary>Aviation</summary>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="UK Airports">
             <input type="checkbox" class="layer-cb" data-layer="airports_uk">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#38bdf8"></span>
             <span class="layer-name">UK Airports</span>
           </label>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="Global Airports">
             <input type="checkbox" class="layer-cb" data-layer="airports_global">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#0284c7"></span>
             <span class="layer-name">Global Airports</span>
           </label>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="Live Flights (FlightRadar24)">
             <input type="checkbox" class="layer-cb" data-layer="flights">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#f59e0b"></span>
@@ -549,17 +593,17 @@
           </label>
         </details>
 
-        <details class="panel-disclosure">
+        <details class="panel-disclosure layer-group" data-layer-group="intel">
           <summary>Intel & Core</summary>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="Police Force Areas">
             <input type="checkbox" class="layer-cb" data-layer="areas">
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#818cf8"></span>
             <span class="layer-name">Police Force Areas</span>
           </label>
 
-          <label class="layer-row">
+          <label class="layer-row" data-layer-name="Companies (search)">
             <input type="checkbox" class="layer-cb" data-layer="companies" checked>
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="layer-dot" style="background:#a78bfa"></span>
@@ -581,48 +625,148 @@
             <div id="airport-search-results" class="airport-results"></div>
           </div>
         </details>
+        <details class="panel-disclosure layer-group" data-layer-group="maritime" open>
+          <summary>Maritime</summary>
 
-        <details class="panel-disclosure layer-tool-block" data-layer-tools="flights">
-          <summary>Flight Intelligence Filters</summary>
-          <div class="flight-intel-tools">
-            <label for="flight-airport-q">Airport (IATA/ICAO/Name/City)</label>
-            <input id="flight-airport-q" type="text" placeholder="e.g. LHR, EGLL, Heathrow, London" />
+          <label class="layer-row" data-layer-name="Seaports">
+            <input type="checkbox" class="layer-cb" data-layer="seaports">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="layer-dot" style="background:#2dd4bf"></span>
+            <span class="layer-name">Seaports</span>
+          </label>
 
-            <label for="flight-origin-q">Origin Airport</label>
-            <input id="flight-origin-q" type="text" placeholder="IATA/ICAO/Name/City" />
+          <label class="layer-row" data-layer-name="Ships (AIS Live)">
+            <input type="checkbox" class="layer-cb" data-layer="ships">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="layer-dot" style="background:#06b6d4"></span>
+            <span class="layer-name">Ships (AIS Live)</span>
+          </label>
 
-            <label for="flight-destination-q">Destination Airport</label>
-            <input id="flight-destination-q" type="text" placeholder="IATA/ICAO/Name/City" />
+        </details>
 
-            <label for="flight-aircraft-q">Aircraft (ICAO24)</label>
-            <input id="flight-aircraft-q" type="text" placeholder="e.g. 40621a" />
+        <details class="panel-disclosure layer-group" data-layer-group="infrastructure" open>
+          <summary>Infrastructure</summary>
 
-            <label for="flight-number-q">Flight Number / Callsign</label>
-            <input id="flight-number-q" type="text" placeholder="e.g. BAW130" />
+          <label class="layer-row" data-layer-name="Cell Towers (Telecom Infrastructure)">
+            <input type="checkbox" class="layer-cb" data-layer="cellTowers">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="layer-dot" style="background:#22c55e"></span>
+            <span class="layer-name">Cell Towers (Telecom Infrastructure)</span>
+          </label>
 
-            <label class="inline-checkbox">
-              <input id="flight-passenger-large-only" type="checkbox" checked />
-              Show only passenger / largest aircraft
-            </label>
+          <label class="layer-row" data-layer-name="Crime Incidents">
+            <input type="checkbox" class="layer-cb" data-layer="crime">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="layer-dot" style="background:#ef4444"></span>
+            <span class="layer-name">Crime Incidents</span>
+          </label>
 
-            <div class="flight-intel-time-row">
-              <div>
-                <label for="flight-time-from">Seen From</label>
-                <input id="flight-time-from" type="time" />
+        </details>
+        <details class="panel-disclosure layer-tool-block" data-layer-tools="crime">
+          <summary>Crime Intelligence Console</summary>
+
+          <div class="crime-intel-tools">
+            <div class="crime-summary-row">
+              <div class="crime-summary-card">
+                <span class="crime-summary-label">Incidents</span>
+                <span class="crime-summary-value" id="crime-summary-incidents">--</span>
               </div>
-              <div>
-                <label for="flight-time-to">Seen To</label>
-                <input id="flight-time-to" type="time" />
+              <div class="crime-summary-card">
+                <span class="crime-summary-label">Stop &amp; Search</span>
+                <span class="crime-summary-value" id="crime-summary-stops">--</span>
+              </div>
+              <div class="crime-summary-card">
+                <span class="crime-summary-label">Outcomes</span>
+                <span class="crime-summary-value" id="crime-summary-outcomes">--</span>
+              </div>
+              <div class="crime-summary-card">
+                <span class="crime-summary-label">Active Cells</span>
+                <span class="crime-summary-value" id="crime-summary-cells">--</span>
               </div>
             </div>
 
-            <div class="flight-intel-actions">
-              <button id="flight-filter-btn" class="btn-secondary btn-sm" type="button">Apply Flight Filter</button>
-              <button id="flight-filter-clear-btn" class="btn-secondary btn-sm" type="button">Clear Filter</button>
+            <div class="crime-filter-actions-row">
+              <button id="crime-show-all-btn" class="btn-secondary btn-sm" type="button">UK Overview</button>
+              <button id="crime-filter-force-btn" class="btn-secondary btn-sm" type="button">Use Selected Police Force</button>
+              <button id="crime-reset-filter-btn" class="btn-secondary btn-sm" type="button">Reset Filters</button>
+              <button id="crime-clear-filter-btn" class="btn-secondary btn-sm" type="button">Clear Selection</button>
             </div>
-            <div id="flight-filter-results" class="flight-filter-results"></div>
+
+            <div class="crime-filter-columns">
+              <div class="crime-filter-card">
+                <label>Police Forces</label>
+                <div class="crime-filter-field">
+                  <select id="crime-force-filter" multiple size="6" class="airport-results"></select>
+                </div>
+              </div>
+              <div class="crime-filter-card">
+                <label>Crime Types</label>
+                <div class="crime-filter-field">
+                  <select id="crime-type-filter" multiple size="6" class="airport-results"></select>
+                </div>
+              </div>
+              <div class="crime-filter-card crime-timeline-card">
+                <label>Timeline</label>
+                <div class="crime-timeline-slider">
+                  <input type="range" id="crime-month-slider" min="0" max="0" value="0" />
+                  <div id="crime-month-slider-label" class="crime-timeline-label">Timeline loading…</div>
+                </div>
+                <div class="crime-window-pills">
+                  <button class="crime-window-pill" data-month-window="3" type="button">Last 3 months</button>
+                  <button class="crime-window-pill" data-month-window="6" type="button">Last 6 months</button>
+                  <button class="crime-window-pill" data-month-window="12" type="button">Last 12 months</button>
+                  <button class="crime-window-pill" data-month-window="0" type="button">All months</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="crime-filter-status" class="crime-filter-status">Crime data pending</div>
+
+            <div class="crime-inspector" id="crime-inspector">
+              <div class="crime-inspector-empty" id="crime-inspector-empty">
+                Activate any crime grid cell to review timelines, outcomes, and exact incident samples.
+              </div>
+              <div class="crime-inspector-body hidden" id="crime-inspector-body">
+                <div class="crime-inspector-header">
+                  <div>
+                    <div class="crime-inspector-title" id="crime-inspector-title">Crime cell</div>
+                    <div class="crime-inspector-subtitle" id="crime-inspector-subtitle"></div>
+                  </div>
+                  <div class="crime-inspector-actions">
+                    <button id="crime-inspector-zoom" class="btn-secondary btn-sm" type="button">Zoom</button>
+                    <button id="crime-inspector-clear" class="btn-secondary btn-sm" type="button">Clear</button>
+                  </div>
+                </div>
+                <div class="crime-inspector-range" id="crime-inspector-range">All months</div>
+                <div class="crime-inspector-stats">
+                  <div class="crime-inspector-stat">
+                    <span class="crime-inspector-value" id="crime-inspector-incidents">--</span>
+                    <span class="crime-inspector-label">Incidents</span>
+                  </div>
+                  <div class="crime-inspector-stat">
+                    <span class="crime-inspector-value" id="crime-inspector-stops">--</span>
+                    <span class="crime-inspector-label">Stop &amp; Search</span>
+                  </div>
+                  <div class="crime-inspector-stat">
+                    <span class="crime-inspector-value" id="crime-inspector-outcomes">--</span>
+                    <span class="crime-inspector-label">Outcomes</span>
+                  </div>
+                </div>
+                <div class="crime-inspector-timeline" id="crime-inspector-timeline"></div>
+                <div class="crime-incident-list-header">
+                  <span>Recent incidents (up to 6 samples)</span>
+                  <div class="crime-incident-actions">
+                    <button id="crime-incident-clear-pins" class="btn-secondary btn-sm" type="button">Clear Pins</button>
+                  </div>
+                </div>
+                <div class="crime-incident-list" id="crime-incident-list">
+                  <div class="crime-incident-empty" id="crime-incident-empty">Exact incident samples will appear here.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </details>
+
 
         <details class="panel-disclosure layer-tool-block" data-layer-tools="service_stations">
           <summary>Service Station Filters</summary>
@@ -871,6 +1015,7 @@
   <script src="js/intel_export.js"></script>
   <script src="js/intel_import.js"></script>
   <script src="js/doc_converter.js"></script>
+  <script src="js/sw-register.js"></script>
 
   <!-- Wire KPI bar action buttons -->
   <script>
