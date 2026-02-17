@@ -95,3 +95,10 @@ gfx/vehicle_icons/
 data/vehicle_images/
 data/vehicle_models.json
 data/vehicle_icons_granturismo.json
+
+# Operational data directories (large/sensitive, keep local)
+data/Police Data/
+data/infastructure/
+data/ingest/
+data/live/
+data/Processed/

@@ -66,55 +66,138 @@
     return "default";
   }
 
+  // Shape mapping for EntityStore types
+  const TYPE_SHAPES = {
+    person: "dot", organisation: "box", company: "box", vehicle: "triangle",
+    aircraft: "triangle", location: "diamond", phone: "square", email: "square",
+    vessel: "triangle", port: "diamond", event: "star", document: "square", default: "dot"
+  };
+
+  function _mapStoreTypeToGraphType(type) {
+    if (type === "organisation") return "company";
+    if (type === "vessel" || type === "aircraft") return "aircraft";
+    if (type === "phone" || type === "email" || type === "document") return "default";
+    return type;
+  }
+
+  function buildStoreNodeTooltip(entity) {
+    const lines = [`<b>${escHtml(entity.label || "Unknown")}</b>`];
+    const typeDef = window.EntityStore?.ENTITY_TYPES?.[entity.type];
+    if (typeDef) lines.push(`Type: ${escHtml(typeDef.label)}`);
+    const attrs = entity.attributes || {};
+    if (attrs.address) lines.push(`Address: ${escHtml(attrs.address)}`);
+    if (attrs.dob) lines.push(`DOB: ${escHtml(attrs.dob)}`);
+    if (attrs.vrm) lines.push(`VRM: ${escHtml(attrs.vrm)}`);
+    if (attrs.companyNumber) lines.push(`Company #: ${escHtml(attrs.companyNumber)}`);
+    const rels = window.EntityStore ? window.EntityStore.getRelationshipsFor(entity.id) : [];
+    if (rels.length) lines.push(`Relationships: ${rels.length}`);
+    return lines.join("<br>");
+  }
+
   function buildGraphData() {
-    const entities = window._mapEntities || [];
-    const connections = window._mapConnections || [];
+    // Prefer EntityStore if available and populated
+    const useStore = window.EntityStore && window.EntityStore.getAll().length > 0;
 
-    // Build entity lookup for connection resolution
-    const entityById = {};
-    entities.forEach(e => { entityById[e.id] = e; });
+    let nodes, edges;
 
-    // Nodes
-    const nodes = entities.map(e => {
-      const type = inferEntityType(e);
-      const colors = TYPE_COLORS[type] || TYPE_COLORS.default;
-      const label = (e.label || "Unknown").slice(0, 30);
-      return {
-        id: e.id,
-        label,
-        title: buildNodeTooltip(e),
-        color: { background: colors.bg, border: colors.border, highlight: { background: colors.border, border: "#fff" } },
-        font: { color: colors.font, size: 11, face: "Bahnschrift, Segoe UI, sans-serif" },
-        shape: type === "company" ? "box" : type === "location" ? "diamond" : "dot",
-        size: type === "company" ? 18 : 14,
-        borderWidth: 2,
-        _entityType: type,
-        _entityRef: e.id
-      };
-    });
+    if (useStore) {
+      const storeEntities = window.EntityStore.getAll();
+      const storeRels = window.EntityStore.getAllRelationships();
+      const entityById = {};
+      storeEntities.forEach(e => { entityById[e.id] = e; });
 
-    // Edges — resolve entity IDs from metadata (fromId/toId) or by lat/lng proximity
-    const edges = connections.map(c => {
-      const color = EDGE_COLORS[c.type] || EDGE_COLORS.default;
-      // Connection entity IDs are stored in metadata.fromId / metadata.toId
-      const fromId = c.metadata?.fromId || resolveEntityByLatLng(c.fromLatLng, entities);
-      const toId = c.metadata?.toId || resolveEntityByLatLng(c.toLatLng, entities);
-      if (!fromId || !toId || !entityById[fromId] || !entityById[toId]) return null;
-      return {
-        id: c.id,
-        from: fromId,
-        to: toId,
-        label: (c.label || "").slice(0, 20),
-        color: { color, highlight: "#fff", opacity: 0.8 },
-        font: { color: "#94a3b8", size: 9, strokeWidth: 2, strokeColor: "#0f172a", face: "Bahnschrift, sans-serif" },
-        width: 2,
-        smooth: { type: "continuous", roundness: 0.2 },
-        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-        _connectionType: c.type
-      };
-    });
+      nodes = storeEntities.map(e => {
+        const type = e.type || "default";
+        const graphType = _mapStoreTypeToGraphType(type);
+        const colors = TYPE_COLORS[graphType] || TYPE_COLORS.default;
+        const label = (e.label || "Unknown").slice(0, 30);
+        return {
+          id: e.id, label,
+          title: buildStoreNodeTooltip(e),
+          color: { background: colors.bg, border: colors.border, highlight: { background: colors.border, border: "#fff" } },
+          font: { color: colors.font, size: 11, face: "Bahnschrift, Segoe UI, sans-serif" },
+          shape: TYPE_SHAPES[type] || TYPE_SHAPES.default,
+          size: type === "organisation" ? 18 : 14,
+          borderWidth: 2, _entityType: type, _entityRef: e.id
+        };
+      });
 
-    return { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges.filter(Boolean)) };
+      // Build edges from EntityStore relationships
+      const storeEdges = storeRels.map(r => {
+        if (!entityById[r.fromId] || !entityById[r.toId]) return null;
+        const relType = window.EntityStore.RELATIONSHIP_TYPES[r.type];
+        const color = EDGE_COLORS[r.type] || relType?.color || EDGE_COLORS.default;
+        const displayLabel = r.label || (relType?.label || r.type || "").replace(/_/g, " ");
+        return {
+          id: r.id, from: r.fromId, to: r.toId,
+          label: displayLabel.slice(0, 20),
+          color: { color, highlight: "#fff", opacity: 0.8 },
+          font: { color: "#94a3b8", size: 9, strokeWidth: 2, strokeColor: "#0f172a", face: "Bahnschrift, sans-serif" },
+          width: 2, smooth: { type: "continuous", roundness: 0.2 },
+          arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+          _connectionType: r.type
+        };
+      }).filter(Boolean);
+
+      // Also include legacy connections not in store
+      const storeEdgeIds = new Set(storeEdges.map(e => e.id));
+      const legacyEdges = (window._mapConnections || []).filter(c => !storeEdgeIds.has(c.id)).map(c => {
+        const color = EDGE_COLORS[c.type] || EDGE_COLORS.default;
+        const fromId = c.metadata?.fromId || resolveEntityByLatLng(c.fromLatLng, storeEntities);
+        const toId = c.metadata?.toId || resolveEntityByLatLng(c.toLatLng, storeEntities);
+        if (!fromId || !toId || !entityById[fromId] || !entityById[toId]) return null;
+        return {
+          id: c.id, from: fromId, to: toId,
+          label: (c.label || "").slice(0, 20),
+          color: { color, highlight: "#fff", opacity: 0.8 },
+          font: { color: "#94a3b8", size: 9, strokeWidth: 2, strokeColor: "#0f172a", face: "Bahnschrift, sans-serif" },
+          width: 2, smooth: { type: "continuous", roundness: 0.2 },
+          arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+          _connectionType: c.type
+        };
+      }).filter(Boolean);
+
+      edges = storeEdges.concat(legacyEdges);
+    } else {
+      // Legacy path — read from window._mapEntities / _mapConnections
+      const entities = window._mapEntities || [];
+      const connections = window._mapConnections || [];
+      const entityById = {};
+      entities.forEach(e => { entityById[e.id] = e; });
+
+      nodes = entities.map(e => {
+        const type = inferEntityType(e);
+        const colors = TYPE_COLORS[type] || TYPE_COLORS.default;
+        const label = (e.label || "Unknown").slice(0, 30);
+        return {
+          id: e.id, label,
+          title: buildNodeTooltip(e),
+          color: { background: colors.bg, border: colors.border, highlight: { background: colors.border, border: "#fff" } },
+          font: { color: colors.font, size: 11, face: "Bahnschrift, Segoe UI, sans-serif" },
+          shape: type === "company" ? "box" : type === "location" ? "diamond" : "dot",
+          size: type === "company" ? 18 : 14,
+          borderWidth: 2, _entityType: type, _entityRef: e.id
+        };
+      });
+
+      edges = connections.map(c => {
+        const color = EDGE_COLORS[c.type] || EDGE_COLORS.default;
+        const fromId = c.metadata?.fromId || resolveEntityByLatLng(c.fromLatLng, entities);
+        const toId = c.metadata?.toId || resolveEntityByLatLng(c.toLatLng, entities);
+        if (!fromId || !toId || !entityById[fromId] || !entityById[toId]) return null;
+        return {
+          id: c.id, from: fromId, to: toId,
+          label: (c.label || "").slice(0, 20),
+          color: { color, highlight: "#fff", opacity: 0.8 },
+          font: { color: "#94a3b8", size: 9, strokeWidth: 2, strokeColor: "#0f172a", face: "Bahnschrift, sans-serif" },
+          width: 2, smooth: { type: "continuous", roundness: 0.2 },
+          arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+          _connectionType: c.type
+        };
+      }).filter(Boolean);
+    }
+
+    return { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
   }
 
   function resolveEntityByLatLng(latLng, entities) {

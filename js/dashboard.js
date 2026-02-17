@@ -192,12 +192,19 @@
     const mapCenter = window._map?.getCenter();
     const mapZoom = window._map?.getZoom();
 
+    // EntityStore serialization (v3)
+    let entityStoreData = null;
+    if (window.EntityStore && window.EntityStore.getAll().length > 0) {
+      entityStoreData = window.EntityStore.serialize();
+    }
+
     const workspace = {
-      version: 2,
+      version: 3,
       name,
       savedAt: Date.now(),
       entities,
       connections,
+      entityStore: entityStoreData,
       activeLayers,
       activeBase,
       mapView: mapCenter ? { lat: mapCenter.lat, lng: mapCenter.lng, zoom: mapZoom } : null,
@@ -232,8 +239,10 @@
       if (ws.activeBase) {
         document.querySelector(`.bl-pill[data-base="${ws.activeBase}"]`)?.click();
       }
-      // Restore entities
-      if (ws.entities?.length && typeof placeEntity === "function") {
+      // Restore EntityStore (v3) or legacy entities
+      if (ws.entityStore && window.EntityStore) {
+        window.EntityStore.deserialize(ws.entityStore);
+      } else if (ws.entities?.length && typeof placeEntity === "function") {
         ws.entities.forEach(e => {
           placeEntity(e.latLng, e.iconData, e.label, e.address, e.notes, e.i2EntityData);
         });

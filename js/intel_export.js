@@ -11,8 +11,32 @@
   // ANX is i2's XML chart format. This generates a valid XML file
   // that can be imported into Analyst's Notebook.
   function exportI2ANX() {
-    const entities = window._mapEntities || [];
-    const connections = window._mapConnections || [];
+    // Prefer EntityStore if populated
+    let entities, connections;
+    if (window.EntityStore && window.EntityStore.getAll().length > 0) {
+      // Map EntityStore entities to legacy format for ANX export compatibility
+      entities = window.EntityStore.getAll().map(e => ({
+        id: e.id, label: e.label,
+        address: e.attributes?.address || "",
+        notes: e.attributes?.notes || "",
+        latLng: e.latLng,
+        iconData: { categoryName: e.type, name: e.type },
+        i2EntityData: e.i2EntityData || { entityName: e.type, entityId: e.type, values: Object.entries(e.attributes || {}).map(([k,v]) => ({ propertyName: k, value: String(v) })) },
+        sourceType: e.type
+      }));
+      // Merge EntityStore relationships and legacy connections
+      const storeConns = window.EntityStore.getAllRelationships().map(r => ({
+        id: r.id, from: r.fromId, to: r.toId, label: r.label || r.type, type: r.type, metadata: { fromId: r.fromId, toId: r.toId }
+      }));
+      const legacyConns = (window._mapConnections || []).map(c => ({
+        id: c.id, from: c.metadata?.fromId || c.from, to: c.metadata?.toId || c.to, label: c.label, type: c.type, metadata: c.metadata
+      }));
+      const seenIds = new Set(storeConns.map(c => c.id));
+      connections = storeConns.concat(legacyConns.filter(c => !seenIds.has(c.id)));
+    } else {
+      entities = window._mapEntities || [];
+      connections = window._mapConnections || [];
+    }
 
     if (!entities.length) {
       if (typeof showToast === "function") showToast("No entities to export", "error");

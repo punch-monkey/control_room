@@ -6506,3 +6506,113 @@ button.flight-filter-item span {
   font-weight: 600;
   margin-right: 4px;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Entity Search
+   ═══════════════════════════════════════════════════════════════ */
+.entity-search-panel {
+  margin-bottom: 10px;
+  padding: 8px 0 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.entity-search-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.entity-search-input {
+  flex: 1;
+  background: rgba(15,23,42,0.7);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  font-family: inherit;
+  outline: none;
+}
+.entity-search-input:focus {
+  border-color: rgba(99,102,241,0.5);
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.1);
+}
+.entity-search-filter {
+  background: rgba(15,23,42,0.7);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 6px;
+  padding: 5px 6px;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-family: inherit;
+  min-width: 90px;
+}
+.entity-search-results-container {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+.entity-search-empty {
+  color: #64748b;
+  font-size: 0.72rem;
+  padding: 8px 0;
+  text-align: center;
+}
+.entity-search-results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.entity-search-result {
+  padding: 5px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.74rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.1s;
+}
+.entity-search-result:hover {
+  background: rgba(99,102,241,0.08);
+}
+.entity-search-type {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.entity-search-label {
+  color: #f8fafc;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entity-search-match {
+  color: #94a3b8;
+  font-size: 0.65rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Street View
+   ═══════════════════════════════════════════════════════════════ */
+.sv-unavailable {
+  color: #64748b;
+  font-size: 0.7rem;
+  padding: 8px;
+  text-align: center;
+  background: rgba(15,23,42,0.5);
+  border-radius: 6px;
+  border: 1px dashed rgba(255,255,255,0.08);
+}
+.sv-popup-thumb {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  margin-top: 6px;
+}
