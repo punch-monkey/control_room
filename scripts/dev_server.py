@@ -1,3 +1,4 @@
+import argparse
 import base64
 import gzip
 import json
@@ -5,6 +6,7 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.request
@@ -12,6 +14,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional, Dict, Tuple
 from urllib.parse import urlsplit, parse_qs, urlencode, quote_plus, quote
+
+ThreadingHTTPServer.allow_reuse_address = True
 
 CH_API_BASE = "https://api.company-information.service.gov.uk"
 TFL_API_BASE = "https://api.tfl.gov.uk"
@@ -39,6 +43,10 @@ UK_AIRSPACE_BOUNDS = {
     "west": -9.8,
     "east": 2.8,
 }
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_HOST = os.environ.get("CR_DEV_HOST", "0.0.0.0")
+DEFAULT_PORT = int(os.environ.get("CR_DEV_PORT", "8000") or 8000)
 
 _station_catalog_cache = {
     "loaded": False,
@@ -68,13 +76,48 @@ RAILDATA_ALLOWED_HOSTS = {
     "api.raildata.org.uk",
 }
 
+STATIC_ACCELERATED_FILES = {
+    "/data/processed/crime_grid.geojson": ("data/processed/crime_grid.geojson", "application/geo+json"),
+    "/data/police_force_areas_wgs84.geojson": ("data/police_force_areas_wgs84.geojson", "application/geo+json"),
+}
+
+_STATIC_FILE_CACHE: Dict[str, dict] = {}
+
+
+@dataclass
+class DevServerConfig:
+    host: str = DEFAULT_HOST
+    port: int = DEFAULT_PORT
+    root: Path = PROJECT_ROOT
+
+
+def parse_server_config(argv: Optional[list] = None) -> DevServerConfig:
+    parser = argparse.ArgumentParser(
+        description="Control Room development server"
+    )
+    parser.add_argument("port", nargs="?", type=int, help="Port to bind (default: 8000 or CR_DEV_PORT)")
+    parser.add_argument("--port", dest="override_port", type=int, help="Explicit port override")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="Host/interface to bind (default: %(default)s)")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=PROJECT_ROOT,
+        help="Root directory to serve static assets from",
+    )
+    args = parser.parse_args(argv)
+    host = args.host or DEFAULT_HOST
+    positional_port = getattr(args, "port", None)
+    port = args.override_port or positional_port or DEFAULT_PORT
+    root = args.root.resolve()
+    return DevServerConfig(host=host, port=port, root=root)
+
 
 def b64(s: str) -> str:
     return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
 
 def load_env_file():
-    env_path = Path(__file__).parent.parent / ".env"
+    env_path = PROJECT_ROOT / ".env"
     if env_path.exists():
         print(f"Loading environment from: {env_path}")
         with open(env_path, "r", encoding="utf-8") as f:
@@ -97,6 +140,41 @@ def load_env_file():
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def _serve_accelerated_static(self, route_path: str) -> bool:
+        mapping = STATIC_ACCELERATED_FILES.get(route_path)
+        if not mapping:
+            return False
+        rel_path, mime = mapping
+        try:
+            fs_path = (PROJECT_ROOT / rel_path).resolve(strict=True)
+        except FileNotFoundError:
+            return False
+        if not str(fs_path).startswith(str(PROJECT_ROOT)):
+            return False
+        cached = _STATIC_FILE_CACHE.get(route_path)
+        mtime = fs_path.stat().st_mtime
+        if not cached or cached.get("mtime") != mtime:
+            data = fs_path.read_bytes()
+            gz = gzip.compress(data)
+            cached = {
+                "mtime": mtime,
+                "raw": data,
+                "gzip": gz,
+                "type": mime,
+            }
+            _STATIC_FILE_CACHE[route_path] = cached
+        accepts_gzip = "gzip" in (self.headers.get("Accept-Encoding") or "")
+        payload = cached["gzip"] if accepts_gzip else cached["raw"]
+        self.send_response(200)
+        self.send_header("Content-Type", cached["type"])
+        if accepts_gzip:
+            self.send_header("Content-Encoding", "gzip")
+        self.send_header("Cache-Control", "public, max-age=60")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+        return True
+
     def _haversine_km(self, lat1, lon1, lat2, lon2):
         import math
         r = 6371.0
@@ -725,6 +803,10 @@ class Handler(SimpleHTTPRequestHandler):
         }
 
     def do_GET(self):
+        clean_path = self.path.split("?", 1)[0]
+        if clean_path in STATIC_ACCELERATED_FILES and self._serve_accelerated_static(clean_path):
+            return
+
         if self.path.startswith("/__control_room_health"):
             self._send_json(
                 {
@@ -1418,18 +1500,23 @@ class Handler(SimpleHTTPRequestHandler):
         self._send_json({"error": "Not found"}, status=404)
 
 
-def main():
+def main(argv: Optional[list] = None):
     load_env_file()
+    config = parse_server_config(argv)
 
-    port = 8000
-    if len(sys.argv) > 1:
-        port = int(sys.argv[1])
+    try:
+        os.chdir(config.root)
+    except FileNotFoundError:
+        print(f"!! Static root {config.root} does not exist", file=sys.stderr)
+        sys.exit(2)
 
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"\n{'=' * 60}")
+    Handler.protocol_version = "HTTP/1.1"
+    server = ThreadingHTTPServer((config.host, config.port), Handler)
+    print(f"\n{'=' * 72}")
     print("Control Room Server Running")
-    print(f"{'=' * 60}")
-    print(f"Local:  http://localhost:{port}")
+    print(f"{'=' * 72}")
+    print(f"Host:   http://{config.host}:{config.port}")
+    print(f"Root:   {config.root}")
     print(f"Proxy:  /ch/* -> {CH_API_BASE}")
     print(f"Proxy:  /tfl/* -> {TFL_API_BASE}")
     print(f"Proxy:  /postcodes/* -> {POSTCODES_API_BASE}")
@@ -1449,8 +1536,13 @@ def main():
     print("Proxy:  /raildata/service-details?serviceid=... | /raildata/live-board?crs=...")
     print("Proxy:  /raildata/naptan | /raildata/nptg")
     print("Proxy:  /raildata/proxy?url=<full-feed-url>&auth=token|apikey|basic")
-    print(f"{'=' * 60}\n")
-    server.serve_forever()
+    print(f"{'=' * 72}\n")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Stopping Control Room server...")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

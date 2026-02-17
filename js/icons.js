@@ -121,3 +121,12 @@ if (document.readyState === 'loading') {
 } else {
   checkIconAvailability();
 }
+
+// Bridge: createCustomMarker can use IconSystem when available
+function createCustomMarkerMaki(latLng, entityType) {
+  if (window.IconSystem) {
+    var icon = window.IconSystem.resolveEntityIconSync({ type: entityType, attributes: {} });
+    if (icon) return L.marker(latLng, { icon: icon });
+  }
+  return createCustomMarker(latLng, entityType === "organisation" ? "company" : entityType);
+}

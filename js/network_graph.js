@@ -25,7 +25,27 @@
     officer: "#a78bfa",
     psc: "#fbbf24",
     manual: "#22c55e",
-    default: "#64748b"
+    default: "#64748b",
+    // Typed relationship colours (from EntityStore.RELATIONSHIP_TYPES)
+    resides_at: "#22c55e",
+    works_at: "#6366f1",
+    directs: "#a78bfa",
+    controls: "#f59e0b",
+    owns_vehicle: "#f59e0b",
+    uses_phone: "#a855f7",
+    uses_email: "#ec4899",
+    associated_with: "#64748b",
+    registered_at: "#6366f1",
+    berthed_at: "#14b8a6",
+    located_at: "#22c55e",
+    mentions: "#94a3b8",
+    linked_to: "#64748b",
+    secretary_of: "#818cf8",
+    shareholder_of: "#fbbf24",
+    beneficial_owner_of: "#f59e0b",
+    psc_of: "#fbbf24",
+    flew_on: "#38bdf8",
+    travelled_to: "#06b6d4"
   };
 
   function inferEntityType(entity) {

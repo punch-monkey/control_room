@@ -4,3 +4,4 @@
 
 window.CH_API_KEY = "your_api_key_here";
 window.CONTROL_ROOM_API_BASE = "";
+window.GOOGLE_STREETVIEW_API_KEY = "";

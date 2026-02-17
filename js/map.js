@@ -1589,6 +1589,11 @@ companyCluster.addTo(map);
 connectionsLayer.addTo(map);
 entitiesLayer.addTo(map);
 
+// Initialise EntityRenderer (core entity system bridge)
+if (window.EntityRenderer) {
+  window.EntityRenderer.init(map, entitiesMarkerCluster, connectionsLayer);
+}
+
 // Add cluster click behavior for better visibility
 companyCluster.on('clusterclick', function(e) {
   // Zoom in and spiderfy for better connection visibility
@@ -4716,7 +4721,23 @@ const OVERLAY_LOAD_STATE = new Proxy(__OVERLAY_LOAD_STATE, {
     return target[prop];
   }
 });
-// â”€â”€ Ships (AISStream Live) Loader â”€â”€
+
+// ── Ship vessel type classification ──
+function _classifyVesselType(ship) {
+  const t = String(ship.shipType || ship.type || "").toLowerCase();
+  const name = String(ship.name || ship.shipName || "").toLowerCase();
+  if (t.includes("cargo") || t.includes("bulk") || t.includes("container")) return "ship-cargo";
+  if (t.includes("tanker") || t.includes("oil") || t.includes("chemical")) return "ship-tanker";
+  if (t.includes("passenger") || t.includes("cruise") || t.includes("ferry")) return "ship-passenger";
+  if (t.includes("fish") || t.includes("trawl")) return "ship-fishing";
+  if (t.includes("tug") || t.includes("pilot") || t.includes("dredg") || t.includes("military") || t.includes("naval") || t.includes("patrol")) return "ship-special";
+  if (t.includes("sail") || t.includes("yacht") || t.includes("pleasure")) return "ship-pleasure";
+  if (name.includes("tanker")) return "ship-tanker";
+  if (name.includes("ferry")) return "ship-passenger";
+  return "ship-other";
+}
+
+// â"€â"€ Ships (AISStream Live) Loader â"€â"€
 
 async function ensureShipsLoaded() {
 
@@ -4748,24 +4769,35 @@ async function ensureShipsLoaded() {
         if (!ship.lat || !ship.lon)
           return;
 
-        const marker = L.circleMarker(
-          [ship.lat, ship.lon],
-          {
-            radius: 6,
-            color: "#06b6d4",
-            weight: 2,
-            fillColor: "#06b6d4",
-            fillOpacity: 0.7
-          }
-        );
+        const heading = Number.isFinite(Number(ship.heading)) ? Number(ship.heading) : 0;
+        const vesselClass = _classifyVesselType(ship);
+        const shipSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L6 12l1 6h10l1-6L12 2zm0 2.5L16 11H8l4-6.5zM7.5 18.5l-.3 1.5h9.6l-.3-1.5H7.5z"/></svg>';
+        const shipHtml =
+          `<div class="ship-icon ${vesselClass}" style="--ship-icon-size:20px">` +
+            `<span class="ship-inner" style="transform:rotate(${heading}deg)">` +
+              `${shipSvg}` +
+            `</span>` +
+          `</div>`;
+        const shipIcon = L.divIcon({
+          className: "ship-marker",
+          html: shipHtml,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+          popupAnchor: [0, -12]
+        });
 
+        const marker = L.marker([ship.lat, ship.lon], { icon: shipIcon });
+
+        const vesselName = ship.name || ship.shipName || "Unknown Vessel";
+        const vesselType = ship.shipType || ship.type || "";
         marker.bindPopup(
-
-          `<strong>Vessel</strong><br>` +
+          `<strong>${escapeHtml(String(vesselName))}</strong><br>` +
           `<span class="popup-label">MMSI</span> ${escapeHtml(String(ship.mmsi))}<br>` +
+          (ship.imo ? `<span class="popup-label">IMO</span> ${escapeHtml(String(ship.imo))}<br>` : '') +
+          (vesselType ? `<span class="popup-label">Type</span> ${escapeHtml(String(vesselType))}<br>` : '') +
           `<span class="popup-label">Speed</span> ${escapeHtml(String(ship.speed || 0))} knots<br>` +
-          `<span class="popup-label">Heading</span> ${escapeHtml(String(ship.heading || 0))}°`
-
+          `<span class="popup-label">Heading</span> ${heading}°` +
+          (ship.destination ? `<br><span class="popup-label">Destination</span> ${escapeHtml(String(ship.destination))}` : '')
         );
 
         layers.ships.addLayer(marker);
@@ -5000,24 +5032,35 @@ async function ensureShipsLoaded() {
         if (!ship.lat || !ship.lon)
           return;
 
-        const marker = L.circleMarker(
-          [ship.lat, ship.lon],
-          {
-            radius: 6,
-            color: "#06b6d4",
-            weight: 2,
-            fillColor: "#06b6d4",
-            fillOpacity: 0.7
-          }
-        );
+        const heading = Number.isFinite(Number(ship.heading)) ? Number(ship.heading) : 0;
+        const vesselClass = _classifyVesselType(ship);
+        const shipSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L6 12l1 6h10l1-6L12 2zm0 2.5L16 11H8l4-6.5zM7.5 18.5l-.3 1.5h9.6l-.3-1.5H7.5z"/></svg>';
+        const shipHtml =
+          `<div class="ship-icon ${vesselClass}" style="--ship-icon-size:20px">` +
+            `<span class="ship-inner" style="transform:rotate(${heading}deg)">` +
+              `${shipSvg}` +
+            `</span>` +
+          `</div>`;
+        const shipIcon = L.divIcon({
+          className: "ship-marker",
+          html: shipHtml,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+          popupAnchor: [0, -12]
+        });
 
+        const marker = L.marker([ship.lat, ship.lon], { icon: shipIcon });
+
+        const vesselName = ship.name || ship.shipName || "Unknown Vessel";
+        const vesselType = ship.shipType || ship.type || "";
         marker.bindPopup(
-
-          `<strong>Vessel</strong><br>` +
+          `<strong>${escapeHtml(String(vesselName))}</strong><br>` +
           `<span class="popup-label">MMSI</span> ${escapeHtml(String(ship.mmsi))}<br>` +
+          (ship.imo ? `<span class="popup-label">IMO</span> ${escapeHtml(String(ship.imo))}<br>` : '') +
+          (vesselType ? `<span class="popup-label">Type</span> ${escapeHtml(String(vesselType))}<br>` : '') +
           `<span class="popup-label">Speed</span> ${escapeHtml(String(ship.speed || 0))} knots<br>` +
-          `<span class="popup-label">Heading</span> ${escapeHtml(String(ship.heading || 0))}°`
-
+          `<span class="popup-label">Heading</span> ${heading}°` +
+          (ship.destination ? `<br><span class="popup-label">Destination</span> ${escapeHtml(String(ship.destination))}` : '')
         );
 
         layers.ships.addLayer(marker);

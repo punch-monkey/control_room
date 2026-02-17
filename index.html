@@ -334,6 +334,26 @@
         </div>
         <div class="cp-quick-hint">Use drag-and-drop import for fast demos, then refine with manual links.</div>
 
+        <!-- Entity Search -->
+        <div class="entity-search-panel">
+          <div class="entity-search-row">
+            <input id="entity-search-input" type="text" placeholder="Search entities..." class="entity-search-input" autocomplete="off" />
+            <select id="entity-search-type-filter" class="entity-search-filter">
+              <option value="">All Types</option>
+              <option value="person">Person</option>
+              <option value="vehicle">Vehicle</option>
+              <option value="organisation">Organisation</option>
+              <option value="location">Location</option>
+              <option value="phone">Phone</option>
+              <option value="email">Email</option>
+              <option value="vessel">Vessel</option>
+              <option value="aircraft">Aircraft</option>
+              <option value="document">Document</option>
+            </select>
+          </div>
+          <div id="entity-search-results" class="entity-search-results-container"></div>
+        </div>
+
         <div class="entity-help">
           <strong>Entity Placement + i2 Workspace</strong>
           <p><strong>To place:</strong> Click a category below -> click on map -> enter details (name, address, notes)</p>
@@ -868,6 +888,33 @@
   </div>
 
   <!-- Status bar -->
+  <!-- Entity Inspector Panel (right slide-out) -->
+  <div id="entity-inspector">
+    <button class="inspector-close" id="inspector-close-btn" title="Close inspector">&times;</button>
+    <div id="inspector-type-badge" class="inspector-type-badge">Entity</div>
+    <div id="inspector-label" class="inspector-label">—</div>
+    <div id="inspector-streetview" class="inspector-section"></div>
+    <div class="inspector-section">
+      <h4>Attributes</h4>
+      <table id="inspector-attrs" class="inspector-attr-table"><tbody></tbody></table>
+    </div>
+    <div class="inspector-section">
+      <h4>Source</h4>
+      <div id="inspector-source">—</div>
+    </div>
+    <div class="inspector-section">
+      <h4>Relationships</h4>
+      <ul id="inspector-relationships" class="inspector-relationships"><li>None</li></ul>
+    </div>
+    <div class="inspector-section">
+      <div class="popup-btn-row">
+        <button class="popup-psc-btn" id="inspector-edit-btn">Edit</button>
+        <button class="popup-psc-btn" id="inspector-connect-btn">Connect</button>
+        <button class="popup-psc-btn" id="inspector-remove-btn">Remove</button>
+      </div>
+    </div>
+  </div>
+
   <div id="status-bar">
     <div class="status-left">
       <span class="status-indicator" id="status-indicator"></span>
@@ -994,6 +1041,8 @@
   <script src="js/core/entity_store.js"></script>
   <script src="js/core/entity_renderer.js"></script>
   <script src="js/core/ingestion_pipeline.js"></script>
+  <script src="js/core/entity_search.js"></script>
+  <script src="js/core/streetview.js"></script>
 
   <!-- API Modules -->
   <script src="js/ch_api.js"></script>
@@ -1022,6 +1071,83 @@
   <script src="js/intel_import.js"></script>
   <script src="js/doc_converter.js"></script>
   <script src="js/sw-register.js"></script>
+
+  <!-- Entity Inspector + Search Init -->
+  <script>
+    // Inspector panel logic
+    window.openEntityInspector = function(entityId) {
+      const panel = document.getElementById("entity-inspector");
+      if (!panel || !window.EntityStore) return;
+      const entity = window.EntityStore.getEntity(entityId);
+      if (!entity) {
+        // Try legacy
+        const legacy = (window._mapEntities || []).find(e => e.id === entityId);
+        if (!legacy) return;
+      }
+      const e = entity || {};
+      const typeDef = window.EntityStore.ENTITY_TYPES[e.type];
+      const badge = document.getElementById("inspector-type-badge");
+      if (badge) { badge.textContent = typeDef?.label || e.type || "Entity"; badge.style.background = typeDef?.color || "#64748b"; }
+      document.getElementById("inspector-label").textContent = e.label || "Unknown";
+
+      // Attributes
+      const tbody = document.querySelector("#inspector-attrs tbody");
+      if (tbody) {
+        let rows = "";
+        const attrs = e.attributes || {};
+        Object.keys(attrs).forEach(k => {
+          if (attrs[k]) rows += `<tr><td>${k.replace(/_/g, " ")}</td><td>${String(attrs[k]).substring(0, 120)}</td></tr>`;
+        });
+        if (e.latLng) rows += `<tr><td>Lat/Lng</td><td>${e.latLng[0]?.toFixed(5)}, ${e.latLng[1]?.toFixed(5)}</td></tr>`;
+        tbody.innerHTML = rows || "<tr><td colspan='2'>No attributes</td></tr>";
+      }
+
+      // Source
+      const srcEl = document.getElementById("inspector-source");
+      if (srcEl) {
+        if (e.source?.documentId) {
+          const doc = window.EntityStore.getEntity(e.source.documentId);
+          srcEl.innerHTML = `<span class="popup-tag" style="background:#475569">${doc?.label || e.source.documentId}</span>` +
+            (e.source.method ? ` [${e.source.method}]` : "") +
+            (e.source.confidence ? ` (${e.source.confidence})` : "");
+        } else srcEl.textContent = "Manual placement";
+      }
+
+      // Relationships
+      const relEl = document.getElementById("inspector-relationships");
+      if (relEl) {
+        const rels = window.EntityStore.getRelationshipsFor(entityId);
+        if (rels.length) {
+          relEl.innerHTML = rels.map(r => {
+            const relType = window.EntityStore.RELATIONSHIP_TYPES[r.type];
+            const other = r.fromId === entityId ? window.EntityStore.getEntity(r.toId) : window.EntityStore.getEntity(r.fromId);
+            const dir = r.fromId === entityId ? "→" : "←";
+            return `<li><span class="inspector-rel-type" style="background:${relType?.color || '#64748b'}">${(relType?.label || r.type).replace(/_/g, " ")}</span> ${dir} ${other?.label || "?"}</li>`;
+          }).join("");
+        } else relEl.innerHTML = "<li>None</li>";
+      }
+
+      // Street View
+      const svEl = document.getElementById("inspector-streetview");
+      if (svEl && e.latLng && window.StreetView) {
+        window.StreetView.renderThumbnail(svEl, e.latLng[0], e.latLng[1]);
+      } else if (svEl) svEl.innerHTML = "";
+
+      // Wire action buttons
+      document.getElementById("inspector-edit-btn").onclick = () => { if (typeof editEntity === "function") editEntity(entityId); };
+      document.getElementById("inspector-connect-btn").onclick = () => { if (typeof drawConnectionFrom === "function") drawConnectionFrom(entityId); };
+      document.getElementById("inspector-remove-btn").onclick = () => { if (typeof removeEntity === "function") removeEntity(entityId); panel.classList.remove("open"); };
+
+      panel.classList.add("open");
+      panel._currentEntityId = entityId;
+    };
+    document.getElementById("inspector-close-btn")?.addEventListener("click", () => {
+      document.getElementById("entity-inspector")?.classList.remove("open");
+    });
+
+    // Init entity search when DOM is ready
+    if (window.EntitySearch) window.EntitySearch.init();
+  </script>
 
   <!-- Wire KPI bar action buttons -->
   <script>
