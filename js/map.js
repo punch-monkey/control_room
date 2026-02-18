@@ -167,7 +167,8 @@ const CRIME_INSPECTOR_UI = {
 const CRIME_INSPECTOR_STATE = {
   feature: null,
   marker: null,
-  stats: null
+  stats: null,
+  samples: []
 };
 
 let CRIME_INCIDENT_LAYER = null;
@@ -622,9 +623,7 @@ function initCrimeInspectorUI() {
     const target = event.target.closest("button[data-incident-index]");
     if (!target) return;
     const idx = Number(target.dataset.incidentIndex);
-    const samples = Array.isArray(CRIME_INSPECTOR_STATE.feature?.properties?.incident_samples)
-      ? CRIME_INSPECTOR_STATE.feature.properties.incident_samples
-      : [];
+    const samples = Array.isArray(CRIME_INSPECTOR_STATE.samples) ? CRIME_INSPECTOR_STATE.samples : [];
     const sample = samples[idx];
     if (sample) {
       highlightCrimeIncident(sample);
@@ -661,7 +660,8 @@ function renderCrimeInspector() {
   if (CRIME_INSPECTOR_UI.stops) CRIME_INSPECTOR_UI.stops.textContent = formatCrimeNumber(stats.stops);
   if (CRIME_INSPECTOR_UI.outcomes) CRIME_INSPECTOR_UI.outcomes.textContent = formatCrimeNumber(stats.outcomes);
   renderCrimeInspectorTimeline(stats.timeline);
-  const samples = Array.isArray(props.incident_samples) ? props.incident_samples : [];
+  const samples = getCrimeSamplesForActiveRange(props, getActiveMonthStart());
+  CRIME_INSPECTOR_STATE.samples = samples;
   renderCrimeIncidentList(samples);
   CRIME_INSPECTOR_UI.body?.classList.remove("hidden");
   CRIME_INSPECTOR_UI.empty?.classList.add("hidden");
@@ -694,6 +694,12 @@ function renderCrimePopupTimeline(series = []) {
     return `<div class="crime-popup-timeline-bar" style="height:${height}%"></div>`;
   }).join("");
   return `<div class="crime-popup-timeline">${bars}</div>`;
+}
+
+function getCrimeSamplesForActiveRange(props = {}, monthStart = getActiveMonthStart()) {
+  const samples = Array.isArray(props.incident_samples) ? props.incident_samples : [];
+  if (!monthStart) return samples;
+  return samples.filter((sample) => !sample?.month || String(sample.month) >= monthStart);
 }
 
 function renderCrimeIncidentList(samples) {
@@ -765,6 +771,7 @@ function clearCrimeInspector() {
   CRIME_INSPECTOR_STATE.feature = null;
   CRIME_INSPECTOR_STATE.marker = null;
   CRIME_INSPECTOR_STATE.stats = null;
+  CRIME_INSPECTOR_STATE.samples = [];
   if (!CRIME_INSPECTOR_UI.container) return;
   CRIME_INSPECTOR_UI.body?.classList.add("hidden");
   if (CRIME_INSPECTOR_UI.incidentList && CRIME_INSPECTOR_UI.incidentEmpty) {
@@ -817,7 +824,7 @@ function buildCrimePopupHtml(props = {}, forces = [], crimeType = "Crime Hotspot
       lines.push(renderCrimePopupTimeline(stats.timeline));
     }
   }
-  const samples = Array.isArray(props.incident_samples) ? props.incident_samples : [];
+  const samples = getCrimeSamplesForActiveRange(props, getActiveMonthStart());
   if (samples.length) {
     const sample = samples[0];
     const sampleParts = [
