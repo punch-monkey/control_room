@@ -41,11 +41,11 @@
     })();
 
   </script>
-  <script>(function(){var t=localStorage.getItem('cr-theme')||'indigo';document.documentElement.dataset.theme=t;})();</script>
+  <script>(function(){var t=localStorage.getItem('cr-theme')||'indigo';var ok={indigo:1,light:1,noir:1,warm:1,arctic:1,teal:1,rose:1};document.documentElement.dataset.theme=ok[t]?t:'indigo';})();</script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-  <link rel="stylesheet" href="css/style.css?v=20260218g">
+  <link rel="stylesheet" href="css/style.css?v=20260218i">
   <!-- vis-network for link analysis graph -->
   <script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
 </head>
@@ -99,9 +99,12 @@
       <span class="kpi-pill-label">Theme</span>
       <div class="kpi-pills" id="theme-pills">
         <button class="kpi-pill active" data-theme="indigo">Indigo</button>
+        <button class="kpi-pill" data-theme="light">Light</button>
+        <button class="kpi-pill" data-theme="noir">Noir</button>
         <button class="kpi-pill" data-theme="warm">Warm</button>
         <button class="kpi-pill" data-theme="arctic">Arctic</button>
         <button class="kpi-pill" data-theme="teal">Teal</button>
+        <button class="kpi-pill" data-theme="rose">Rose</button>
       </div>
     </div>
     <div class="kpi-separator"></div>
@@ -1083,7 +1086,7 @@
   <script src="js/icons.js"></script>
 
   <!-- Map -->
-  <script src="js/map.js?v=20260218h"></script>
+  <script src="js/map.js?v=20260218i"></script>
 
   <!-- Live Data Layers -->
   <script src="js/tfl_live.js"></script>

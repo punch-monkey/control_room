@@ -139,6 +139,93 @@
   --ui-btn-primary-to: #0d9488;
 }
 
+/* ══ Theme: Light Command ══ */
+[data-theme="light"] {
+  --ui-bg-body: #e8eef6;
+  --ui-bg: rgba(247, 250, 255, 0.94);
+  --ui-bg-solid: #f5f8fd;
+  --ui-surface: rgba(236, 243, 252, 0.92);
+  --ui-card-bg: rgba(255, 255, 255, 0.88);
+  --ui-input-bg: rgba(255, 255, 255, 0.94);
+  --ui-popup-bg: rgba(249, 252, 255, 0.98);
+  --ui-border: rgba(37, 99, 235, 0.2);
+  --ui-border-subtle: rgba(30, 41, 59, 0.12);
+  --ui-card-border: rgba(30, 41, 59, 0.12);
+  --ui-input-border: rgba(37, 99, 235, 0.25);
+  --ui-popup-border: rgba(37, 99, 235, 0.2);
+  --ui-accent-border: rgba(37, 99, 235, 0.35);
+  --ui-text: #10223d;
+  --ui-text-bright: #06142d;
+  --ui-subtle: #3f5674;
+  --ui-text-muted: #637b96;
+  --ui-accent: #2563eb;
+  --ui-accent-strong: #1d4ed8;
+  --ui-accent-glow: rgba(37, 99, 235, 0.24);
+  --ui-accent-soft: rgba(37, 99, 235, 0.12);
+  --ui-secondary: #0891b2;
+  --ui-secondary-soft: rgba(8, 145, 178, 0.12);
+  --ui-btn-primary-from: #2563eb;
+  --ui-btn-primary-to: #0284c7;
+}
+
+/* ══ Theme: Noir Grid ══ */
+[data-theme="noir"] {
+  --ui-bg-body: #030407;
+  --ui-bg: rgba(4, 5, 9, 0.96);
+  --ui-bg-solid: #040509;
+  --ui-surface: rgba(10, 12, 18, 0.9);
+  --ui-card-bg: rgba(255, 255, 255, 0.015);
+  --ui-input-bg: rgba(255, 255, 255, 0.03);
+  --ui-popup-bg: rgba(3, 4, 7, 0.97);
+  --ui-border: rgba(148, 163, 184, 0.22);
+  --ui-border-subtle: rgba(255, 255, 255, 0.07);
+  --ui-card-border: rgba(255, 255, 255, 0.045);
+  --ui-input-border: rgba(148, 163, 184, 0.2);
+  --ui-popup-border: rgba(148, 163, 184, 0.2);
+  --ui-accent-border: rgba(148, 163, 184, 0.3);
+  --ui-text: #dde4ef;
+  --ui-text-bright: #f8fafc;
+  --ui-subtle: #91a1b7;
+  --ui-text-muted: #6b7a8e;
+  --ui-accent: #94a3b8;
+  --ui-accent-strong: #cbd5e1;
+  --ui-accent-glow: rgba(203, 213, 225, 0.24);
+  --ui-accent-soft: rgba(203, 213, 225, 0.08);
+  --ui-secondary: #64748b;
+  --ui-secondary-soft: rgba(100, 116, 139, 0.12);
+  --ui-btn-primary-from: #334155;
+  --ui-btn-primary-to: #0f172a;
+}
+
+/* ══ Theme: Rose Intelligence ══ */
+[data-theme="rose"] {
+  --ui-bg-body: #130813;
+  --ui-bg: rgba(20, 8, 20, 0.95);
+  --ui-bg-solid: #160a16;
+  --ui-surface: rgba(34, 10, 32, 0.9);
+  --ui-card-bg: rgba(255, 255, 255, 0.02);
+  --ui-input-bg: rgba(255, 255, 255, 0.04);
+  --ui-popup-bg: rgba(22, 8, 20, 0.97);
+  --ui-border: rgba(244, 114, 182, 0.22);
+  --ui-border-subtle: rgba(255, 255, 255, 0.07);
+  --ui-card-border: rgba(255, 255, 255, 0.05);
+  --ui-input-border: rgba(251, 113, 133, 0.24);
+  --ui-popup-border: rgba(244, 114, 182, 0.24);
+  --ui-accent-border: rgba(244, 114, 182, 0.34);
+  --ui-text: #ffe4f2;
+  --ui-text-bright: #fff1f7;
+  --ui-subtle: #d4a2bd;
+  --ui-text-muted: #ab7d95;
+  --ui-accent: #f472b6;
+  --ui-accent-strong: #fb7185;
+  --ui-accent-glow: rgba(244, 114, 182, 0.28);
+  --ui-accent-soft: rgba(244, 114, 182, 0.1);
+  --ui-secondary: #f9a8d4;
+  --ui-secondary-soft: rgba(249, 168, 212, 0.14);
+  --ui-btn-primary-from: #db2777;
+  --ui-btn-primary-to: #ec4899;
+}
+
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -178,6 +265,18 @@ body {
    Brighten dark tiles so roads/labels are legible */
 .dark-tiles-boosted {
   filter: brightness(1.35) contrast(0.95) saturate(1.1);
+}
+
+[data-theme="light"] #map {
+  filter: brightness(1.08) contrast(0.96) saturate(0.9);
+}
+
+[data-theme="noir"] #map {
+  filter: brightness(0.9) contrast(1.08) saturate(0.85);
+}
+
+[data-theme="rose"] #map {
+  filter: hue-rotate(318deg) saturate(1.2) brightness(0.95) contrast(1.03);
 }
 
 /* â”€â”€ Panel shell â”€â”€ */
@@ -7095,4 +7194,48 @@ body.ux-revamp .sv-popup-fallback {
 .google-api-cat {
   font-size: 10px;
   color: #9bb9d0;
+}
+
+[data-theme="light"] .kpi-bar,
+[data-theme="light"] #control-panel,
+[data-theme="light"] .entity-panel,
+[data-theme="light"] .bottom-panel,
+[data-theme="light"] .leaflet-popup-content-wrapper {
+  box-shadow:
+    0 12px 34px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(37, 99, 235, 0.1) inset;
+}
+
+[data-theme="light"] .kpi-brand-title,
+[data-theme="light"] .cp-title,
+[data-theme="light"] .entity-panel-title,
+[data-theme="light"] .kpi-value {
+  color: #0f2f5c !important;
+}
+
+[data-theme="light"] .kpi-pill,
+[data-theme="light"] .kpi-action-btn,
+[data-theme="light"] .popup-psc-btn {
+  color: #0f2f5c !important;
+  border-color: rgba(37, 99, 235, 0.35) !important;
+  background: linear-gradient(180deg, rgba(219, 234, 254, 0.9), rgba(191, 219, 254, 0.8)) !important;
+}
+
+[data-theme="light"] .cp-tab.active,
+[data-theme="light"] .btn-primary,
+[data-theme="light"] .quick-action-btn {
+  color: #f8fbff !important;
+  background: linear-gradient(135deg, #2563eb, #0284c7) !important;
+}
+
+[data-theme="rose"] .kpi-brand-title,
+[data-theme="rose"] .cp-title,
+[data-theme="rose"] .entity-panel-title {
+  text-shadow: 0 0 12px rgba(244, 114, 182, 0.38);
+}
+
+[data-theme="rose"] .kpi-pill.active,
+[data-theme="rose"] .cp-tab.active,
+[data-theme="rose"] .btn-primary {
+  box-shadow: 0 0 0 1px rgba(249, 168, 212, 0.25) inset, 0 0 18px rgba(219, 39, 119, 0.35);
 }

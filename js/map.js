@@ -8105,11 +8105,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ── UI Theme pills ──
   (function initThemePills() {
     const pills = document.querySelectorAll("#theme-pills [data-theme]");
-    const saved = localStorage.getItem("cr-theme") || "indigo";
+    const allowedThemes = new Set(["indigo", "light", "noir", "warm", "arctic", "teal", "rose"]);
+    const savedRaw = localStorage.getItem("cr-theme") || "indigo";
+    const saved = allowedThemes.has(savedRaw) ? savedRaw : "indigo";
+    document.documentElement.dataset.theme = saved;
     pills.forEach(p => {
       p.classList.toggle("active", p.dataset.theme === saved);
       p.addEventListener("click", () => {
         const theme = p.dataset.theme;
+        if (!allowedThemes.has(theme)) return;
         document.documentElement.dataset.theme = theme;
         localStorage.setItem("cr-theme", theme);
         pills.forEach(q => q.classList.toggle("active", q === p));
