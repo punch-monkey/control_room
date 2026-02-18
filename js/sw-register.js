@@ -1,6 +1,24 @@
 (function registerControlRoomSW() {
   if (!("serviceWorker" in navigator)) return;
   if (window.location.protocol === "file:") return;
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isLocalhost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+
+  // In local development, force-disable SW to avoid stale cache-first assets.
+  if (isLocalhost) {
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((r) => r.unregister())))
+      .catch(() => {});
+    if (window.caches && typeof window.caches.keys === "function") {
+      window.caches.keys()
+        .then((keys) => Promise.all(keys
+          .filter((k) => String(k || "").startsWith("control-room-"))
+          .map((k) => window.caches.delete(k))))
+        .catch(() => {});
+    }
+    return;
+  }
+
   const scope = document.currentScript?.dataset?.scope || "/";
   const swUrl = document.currentScript?.dataset?.sw || "/sw.js";
   const register = () => {

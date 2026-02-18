@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.02.16";
+const APP_VERSION = "2026.02.18.1";
 const STATIC_CACHE = `control-room-static-${APP_VERSION}`;
 const DATA_CACHE = `control-room-data-${APP_VERSION}`;
 const SW_URL = new URL(self.location.href);
