@@ -1348,7 +1348,7 @@ async function geocodeViaOsPlaces(rawPostcode) {
   return null;
 }
 
-async function geocodeViaOsPlacesAddress(rawAddress) {
+async function geocodeViaOsPlacesAddress(rawAddress, options = {}) {
   const query = String(rawAddress || "").trim();
   if (!query) return null;
   let resp = null;
@@ -1374,8 +1374,11 @@ async function geocodeViaOsPlacesAddress(rawAddress) {
     return new RegExp(`(^|\\W)${escaped}(\\W|$)`, "i").test(h);
   };
 
+  const strict = !!options.strict;
   let bestRec = null;
   let bestScore = -9999;
+  let bestNumberMatched = false;
+  let bestStreetMatched = false;
   for (const row of results) {
     const rec = row?.DPA || row?.LPI || null;
     if (!rec) continue;
@@ -1402,13 +1405,20 @@ async function geocodeViaOsPlacesAddress(rawAddress) {
       else if (candidatePostcode && candidatePostcode.slice(0, -3) === wantedPostcode.slice(0, -3)) score += 15;
       else score -= 30;
     }
+    const streetMatched = wantedStreet ? candidateText.includes(wantedStreet) : false;
     if (wantedStreet) {
-      if (candidateText.includes(wantedStreet)) score += 35;
+      if (streetMatched) score += 35;
       else score -= 15;
     }
+    let numberMatched = false;
     if (wantedNumber) {
-      if (candidateNumber && candidateNumber === wantedNumber) score += 90;
-      else if (hasToken(candidateText, wantedNumber)) score += 55;
+      if (candidateNumber && candidateNumber === wantedNumber) {
+        score += 90;
+        numberMatched = true;
+      } else if (hasToken(candidateText, wantedNumber)) {
+        score += 55;
+        numberMatched = true;
+      }
       else score -= 45;
     }
     if (row?.DPA) score += 5;
@@ -1416,7 +1426,14 @@ async function geocodeViaOsPlacesAddress(rawAddress) {
     if (score > bestScore) {
       bestScore = score;
       bestRec = rec;
+      bestNumberMatched = numberMatched;
+      bestStreetMatched = streetMatched;
     }
+  }
+
+  if (strict) {
+    if (wantedNumber && !bestNumberMatched) return null;
+    if (wantedStreet && !bestStreetMatched) return null;
   }
 
   const rec = bestRec || results[0]?.DPA || results[0]?.LPI || {};
@@ -1426,9 +1443,13 @@ async function geocodeViaOsPlacesAddress(rawAddress) {
   return null;
 }
 
-async function geocodeViaNominatimAddress(rawAddress) {
+async function geocodeViaNominatimAddress(rawAddress, options = {}) {
   const query = String(rawAddress || "").trim();
   if (!query) return null;
+  const strict = !!options.strict;
+  const parsed = parseAddressString(query) || {};
+  const wantedNumber = String(parsed.buildingNumber || "").toLowerCase();
+  const wantedStreet = String(parsed.streetName || "").toLowerCase();
   let resp = null;
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=gb&q=${encodeURIComponent(query)}`;
   try {
@@ -1440,18 +1461,27 @@ async function geocodeViaNominatimAddress(rawAddress) {
   const rows = await resp.json();
   const first = Array.isArray(rows) ? rows[0] : null;
   if (!first) return null;
+  if (strict) {
+    const display = String(first.display_name || "").toLowerCase();
+    if (wantedNumber && !new RegExp(`(^|\\W)${wantedNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\W|$)`, "i").test(display)) {
+      return null;
+    }
+    if (wantedStreet && !display.includes(wantedStreet)) {
+      return null;
+    }
+  }
   const lat = Number(first.lat);
   const lon = Number(first.lon);
   if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
   return null;
 }
 
-async function geocodeAddress(rawAddress) {
+async function geocodeAddress(rawAddress, options = {}) {
   const query = String(rawAddress || "").trim();
   if (!query) return null;
   try {
-    let coords = await geocodeViaOsPlacesAddress(query);
-    if (!coords) coords = await geocodeViaNominatimAddress(query);
+    let coords = await geocodeViaOsPlacesAddress(query, options);
+    if (!coords) coords = await geocodeViaNominatimAddress(query, options);
     return coords || null;
   } catch (e) {
     console.warn("address geocoding failed:", e);
@@ -3410,7 +3440,7 @@ function bindEntityHoverTooltip(marker, entity) {
 function buildEntityPopup(entityId, entity) {
   const popupStreetViewHtml =
     entity?.latLng && window.StreetView && typeof window.StreetView.getPopupThumbnailHtml === "function"
-      ? window.StreetView.getPopupThumbnailHtml(entity.latLng[0], entity.latLng[1])
+      ? window.StreetView.getPopupThumbnailHtml(entity.latLng[0], entity.latLng[1], { addressString: entity.address || entity.label || "" })
       : "";
   if (entity?.i2EntityData) {
     entity.i2EntityData = normalizeVehicleI2EntityData(entity.i2EntityData, entity.iconData);
@@ -7263,20 +7293,25 @@ document.addEventListener("DOMContentLoaded", async () => {
     const addressString = getI2ValueByNames(i2EntityData, ["Address String", "Address"]) || manualPlacementAddress;
     const extractedPostcode = !postcode ? extractUkPostcode(addressString) : "";
     let geoMethod = "";
+    const parsedAddress = parseAddressString(addressString || "") || null;
+    const hasSpecificAddress = !!(parsedAddress && (parsedAddress.buildingNumber || parsedAddress.streetName));
     if (addressString) {
-      const geoAddress = await geocodeAddress(addressString);
+      const geoAddress = await geocodeAddress(addressString, { strict: true });
       if (geoAddress && Number.isFinite(geoAddress.lat) && Number.isFinite(geoAddress.lon)) {
         placementLatLng = [geoAddress.lat, geoAddress.lon];
         geoMethod = "address";
       }
     }
     const geoPostcode = postcode || extractedPostcode;
-    if (!geoMethod && geoPostcode) {
+    if (!geoMethod && geoPostcode && !hasSpecificAddress) {
       const geo = await geocodePostcode(geoPostcode);
       if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lon)) {
         placementLatLng = [geo.lat, geo.lon];
         geoMethod = "postcode";
       }
+    }
+    if (!geoMethod && hasSpecificAddress && geoPostcode) {
+      showToast("Exact address match not found; postcode fallback skipped to avoid wrong house number", "warning");
     }
 
     if (editingEntity) {

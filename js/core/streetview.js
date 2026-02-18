@@ -32,6 +32,26 @@
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
   }
 
+  function _formatDateYYYYMMDD(d) {
+    var yyyy = d.getFullYear();
+    var mm = String(d.getMonth() + 1).padStart(2, "0");
+    var dd = String(d.getDate()).padStart(2, "0");
+    return String(yyyy) + mm + dd;
+  }
+
+  function _normalizeAddressForFile(address) {
+    var out = String(address || "").replace(/[,]+/g, " ").replace(/\s+/g, " ").trim();
+    return out || "Unknown Location";
+  }
+
+  function _buildDownloadFilename(address) {
+    var dateStamp = _formatDateYYYYMMDD(new Date());
+    var normalizedAddress = _normalizeAddressForFile(address);
+    var base = dateStamp + " - Google Maps - " + normalizedAddress;
+    // Windows-safe filename while preserving requested visual format.
+    return base.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim() + ".png";
+  }
+
   // ── Build Street View Static API URL ──
   function getStaticUrl(lat, lng, options) {
     var key = _getApiKey();
@@ -154,8 +174,8 @@
     var size = options.size || "1280x720";
     var url = getStaticUrl(lat, lng, { size: size, fov: options.fov, heading: options.heading, pitch: options.pitch });
     if (!url) return;
-    var fallbackName = "streetview_" + lat.toFixed(5) + "_" + lng.toFixed(5);
-    var filename = String(options.filename || fallbackName).replace(/[^\w.-]+/g, "_") + ".png";
+    var address = String(options.addressString || options.address || "").trim();
+    var filename = String(options.filename || _buildDownloadFilename(address));
 
     try {
       var resp = await fetch(url);
@@ -186,9 +206,11 @@
   }
 
   // ── Add Street View to entity popup HTML ──
-  function getPopupThumbnailHtml(lat, lng) {
+  function getPopupThumbnailHtml(lat, lng, options) {
+    options = options || {};
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
     var mapsUrl = "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + lat + "," + lng;
+    var addressJs = JSON.stringify(String(options.addressString || options.address || ""));
     if (!isConfigured()) {
       return '<div class="sv-unavailable">Street View not configured</div>' +
         '<a class="popup-psc-btn" href="' + mapsUrl + '" target="_blank" rel="noopener">Open in Google Maps</a>';
@@ -203,7 +225,7 @@
       'style="width:100%;border-radius:4px;margin-top:6px;cursor:pointer;border:1px solid rgba(255,255,255,0.08)" ' +
       'title="Click to open Street View">' +
       '<a class="popup-psc-btn" href="' + mapsUrl + '" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;">Open in Google Maps</a>' +
-      '<button class="popup-psc-btn" type="button" onclick="window.StreetView.downloadPng(' + lat + ',' + lng + ')" style="display:inline-block;margin-top:6px;margin-left:6px;">Download PNG</button>';
+      '<button class="popup-psc-btn" type="button" onclick="window.StreetView.downloadPng(' + lat + ',' + lng + ',{addressString:' + addressJs + '})" style="display:inline-block;margin-top:6px;margin-left:6px;">Download PNG</button>';
   }
 
   // ── Public API ──

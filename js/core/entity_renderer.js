@@ -320,7 +320,9 @@
     var html = '<strong>' + _escapeHtml(entity.label || "Entity") + '</strong>';
     var popupStreetViewHtml =
       entity.latLng && window.StreetView && typeof window.StreetView.getPopupThumbnailHtml === "function"
-        ? window.StreetView.getPopupThumbnailHtml(entity.latLng[0], entity.latLng[1])
+        ? window.StreetView.getPopupThumbnailHtml(entity.latLng[0], entity.latLng[1], {
+          addressString: attrs.address || entity.label || ""
+        })
         : "";
 
     // Type badge
